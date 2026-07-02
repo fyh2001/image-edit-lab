@@ -62,7 +62,16 @@ def test_filter_passes_clean_pair():
     qf = QualityFilter()
     passed, scores, reason = qf.evaluate(a, b)
     assert passed and reason == ""
-    assert set(scores) == {"change_ratio", "sharpness", "background_diff"}
+    assert set(scores) == {"change_ratio", "sharpness", "background_diff", "brightness"}
+
+
+def test_filter_rejects_too_dark():
+    a = _img(4)                           # 近黑（亮度 4 < 阈值 10）
+    b = a.copy()
+    b[20:40, 20:40] = 30
+    passed, scores, reason = QualityFilter().evaluate(a, b)
+    assert not passed and "too_dark" in reason
+    assert scores["brightness"] < 10
 
 
 def test_filter_rejects_blurry():

@@ -21,6 +21,7 @@ class QualityFilter:
         "max_change_ratio": 0.85,
         "min_sharpness": 3.0,
         "max_background_diff": 3.0,
+        "min_brightness": 10.0,       # 平均亮度<此(0-255) → 欠照明近黑、看不清，丢。标定：4.7丢/15.4留
     }
 
     def __init__(self, cfg: Optional[Dict] = None):
@@ -37,6 +38,8 @@ class QualityFilter:
             reasons.append("change_too_large")
         if s["sharpness"] < c["min_sharpness"]:
             reasons.append("too_blurry")
+        if s.get("brightness", 255) < c["min_brightness"]:
+            reasons.append("too_dark")
         if s["background_diff"] > c["max_background_diff"]:
             reasons.append("background_unstable")
         return (not reasons), s, ";".join(reasons)

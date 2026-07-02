@@ -116,10 +116,26 @@ def resolve_description(uid: str, meta_map: Dict[str, dict]) -> dict:
 # tabletop 默认不用它（统一尺寸更好取景）；要用时 provider 传 category_sizes="default"。
 # 生产可扩充或外置成 JSON。
 DEFAULT_CATEGORY_SIZES = {
-    "chair": 1.0, "table": 1.2, "sofa": 2.0, "bed": 2.0, "couch": 2.0,
-    "lamp": 0.5, "vase": 0.3, "bottle": 0.25, "cup": 0.1, "mug": 0.1,
-    "bowl": 0.2, "plate": 0.25, "book": 0.25, "Bible": 0.25, "laptop": 0.35,
-    "keyboard": 0.45, "Band_Aid": 0.07, "apple": 0.08, "banana": 0.2, "ball": 0.22,
+    # 家具（大）：放不上台面 → surface-add 会自动拒（顺带避免"桌上放 desk"）
+    "chair": 1.0, "table": 1.2, "desk": 1.2, "sofa": 2.0, "bed": 2.0, "couch": 2.0,
+    "wardrobe": 1.8, "cabinet": 1.0, "dresser": 1.2, "bookshelf": 1.6, "shelf": 0.8,
+    "stool": 0.5, "bench": 1.2, "nightstand": 0.5, "coffee_table": 1.0,
+    # 灯具/电子
+    "lamp": 0.5, "table_lamp": 0.4, "laptop": 0.35, "keyboard": 0.45, "television_set": 0.9,
+    "remote_control": 0.18, "telephone": 0.16, "camera": 0.14, "clock": 0.22,
+    # 容器/餐具
+    "vase": 0.28, "pottery": 0.24, "bottle": 0.25, "cup": 0.1, "mug": 0.1, "bowl": 0.2,
+    "plate": 0.25, "tray": 0.38, "casserole": 0.3, "pitcher": 0.25, "jar": 0.18, "can": 0.12,
+    "spice_rack": 0.3, "basket": 0.35, "hamper": 0.5,
+    # 书本/文具（小）——之前橡皮/枣被统一 0.30 放太大，这里给真实但仍可见的尺寸
+    "book": 0.25, "Bible": 0.25, "notebook": 0.26, "magazine": 0.3,
+    "eraser": 0.08, "pen": 0.15, "pencil": 0.18, "ruler": 0.3, "scissors": 0.18,
+    # 食物/农产品（小）
+    "apple": 0.08, "banana": 0.2, "sandwich": 0.16, "date": 0.06, "truffle": 0.05,
+    "turnip": 0.1, "orange": 0.08, "lemon": 0.07, "egg": 0.06, "bread": 0.2, "cake": 0.22,
+    # 摆件/其它
+    "candle": 0.18, "picture_frame": 0.3, "painting": 0.6, "picture": 0.5, "figurine": 0.18,
+    "potted_plant": 0.4, "tobacco_pipe": 0.15, "ball": 0.22, "Band_Aid": 0.07, "toy": 0.2,
 }
 
 

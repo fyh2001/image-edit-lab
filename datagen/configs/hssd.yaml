@@ -82,7 +82,10 @@ edits:
         uid_list: "./assets/objaverse_uids.txt"
         local_cache: "./assets/objaverse"
         category_map: "./assets/objaverse_categories.json"
-        target_size: 0.30       # 小物件尺度（书/杯/摆件），放台面自然；广角下别太小看不见
+        # 按类别给**真实尺寸**（橡皮/枣小、书/杯中等）；大件家具→真实大尺寸放不上台面自动被拒。
+        # 未收录的类别退回 target_size。
+        category_sizes: "default"
+        target_size: 0.22       # 未知类别的兜底尺度（放台面自然，广角下仍可见）
     # subject_source：主体来源三模式混合（scene 直接编辑已有 / spawn 加外部物到空表面 /
     # replace 用外部物替换已有物槽位），再对该主体做变换。想全直接编辑就设 {scene: 1}。
     object_scale:

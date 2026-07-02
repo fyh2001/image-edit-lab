@@ -70,10 +70,16 @@ def background_diff(before, after, pix_delta: int = 12, pad_frac: float = 0.05) 
     return float(diff[outside].mean())
 
 
+def mean_luminance(img) -> float:
+    """整幅平均亮度（0-255）。太低 → 场景欠照明、几乎看不清。"""
+    return float(_gray(img).mean())
+
+
 def compute_scores(before, after, pix_delta: int = 12) -> Dict[str, float]:
     """一次性算齐所有标量分数。"""
     return {
         "change_ratio": round(change_ratio(before, after, pix_delta), 4),
         "sharpness": round(laplacian_sharpness(after), 2),
         "background_diff": round(background_diff(before, after, pix_delta), 3),
+        "brightness": round(mean_luminance(before), 1),   # 用 before（源图）判是否太暗
     }

@@ -10,9 +10,12 @@ add 与 delete 互为逆操作，用 prepare()/apply() 控制 before/after：
 """
 from __future__ import annotations
 
+import numpy as np
+
 from datagen.worker.edits.base import EditOperator, EditInvalid
 from datagen.worker.edits._common import noun, hide, copy_transform, transform_dict
 from datagen.worker.edits import _reference
+from datagen.worker.edits import _carried
 from datagen.worker.physics import validity
 from datagen.worker.registry import register_edit, build
 
@@ -28,14 +31,26 @@ class DeleteEdit(EditOperator):
         ref = _reference.subject_phrase(ctx, obj)   # 消歧要在 hide 前算（那时物体还在画面）
         if ref is None:
             raise EditInvalid("object_delete: 主体与画面里同类物体无法区分（歧义），丢弃")
+        # 删掉支撑物（桌/柜）→ 原本放在它顶面的物体应**落到地面**，而非悬空。删前检测、删后落地。
+        carried = _carried.resting_on(obj, ctx.all_objects)
+        hide(obj, True)                          # 被遮挡区域会被 3D 正确补全
+        ground_z = float((ctx.extras.get("scene_geom") or {}).get("ground_z", 0.0))
+        for o in carried:
+            try:
+                bb = np.asarray(o.get_bound_box())
+                loc = np.array(o.get_location(), dtype=float)
+                loc[2] += ground_z - float(bb.min(axis=0)[2])   # 底部落到地面高度
+                o.set_location(loc.tolist())
+            except Exception:
+                pass
         meta = {
             "op": "object_delete", "noun": n,
             "asset_uid": _safe_cp(obj, "asset_uid"),
             "transform": _transform_dict(obj),
             "support": ctx.extras.get("subject_support", "ground"),
+            "dropped_supported": len(carried),   # 落地的被承载物数量
             "validity": {"strategy": "none"},   # 删除不会产生碰撞
         }
-        hide(obj, True)                          # 被遮挡区域会被 3D 正确补全
         instr = self.phrase([f"remove the {ref}", f"delete the {ref}",
                              f"erase the {ref} from the scene"], ctx.rng)
         return instr, meta
