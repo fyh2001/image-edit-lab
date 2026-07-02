@@ -72,14 +72,32 @@ class HSSDScene(SceneBuilder):
         # 房间几何提前算：既给主体尺寸上限用，也给相机/照明用。
         geom = _room_geom(stage_objs or editable)
 
+        # stage 封闭性过滤：破损/开放 stage（悬空地板 + HDRI 露出，质量极低）直接跳过换一间。
+        if p.get("require_enclosed", True):
+            up = _stage_enclosure(geom)
+            if up < float(p.get("min_enclosure", 0.5)):
+                raise RuntimeError(
+                    f"HSSD stage {scene_id} 不够封闭(上方遮盖率 {up:.2f}<阈值)——开放/破损，跳过换一间")
+
+        # 场景内容闸：有些 HSSD stage 内容怪（卧室里摆全尺寸车模等）。若可编辑物体里**室内家居类
+        # 占比太低**，整个场景跳过换一间（别在怪场景上产数据）。
+        from datagen.worker.assets.indoor_categories import is_indoor
+        if p.get("require_indoor_scene", True) and editable:
+            indoor_frac = sum(is_indoor(_cp(o, "category")) for o in editable) / len(editable)
+            if indoor_frac < float(p.get("min_indoor_frac", 0.4)):
+                raise RuntimeError(
+                    f"HSSD stage {scene_id} 室内家居占比 {indoor_frac:.2f} 过低（怪场景），跳过换一间")
+
         # 3) 选主体 + 其余作干扰物（结构件 stage 不算）。
-        # 优先挑「有语义类别 + 体量合适」的家具：太小广角下看不清；**太大（墙面级/结构级built-in，
-        # 如占满一面墙的 shelves）框不进整间房、贴脸像拍墙** → 都排除。大小取"最长边"衡量。
+        # 优先挑「室内家居类 + 有语义类别 + 体量合适」的家具：太小广角下看不清；**太大（墙面级/
+        # 结构级built-in，如占满一面墙的 shelves）框不进整间房、贴脸像拍墙**；**非室内物（车/自行车/
+        # 动物）**不当主体（别产"删掉这辆车"）→ 都排除。大小取"最长边"衡量。
         min_size = float(p.get("min_subject_size", 0.4))
         max_frac = float(p.get("max_subject_room_frac", 0.6))   # 主体最长边 > 房间短边×此值 → 太大
         fit = [o for o in editable if _big_enough(o, min_size) and not _oversized(o, geom, max_frac)]
         labeled = [o for o in (fit or editable) if _cp(o, "category") != "object"]
-        pool = labeled or fit or editable
+        indoor_pool = [o for o in labeled if is_indoor(_cp(o, "category"))]  # 只在室内家居里挑主体
+        pool = indoor_pool or labeled or fit or editable
         subject = pool[int(rng.integers(0, len(pool)))]
         ctx.register_object(subject, is_subject=True)
         for o in editable:
@@ -604,6 +622,38 @@ def set_wide_fov(resolution, fov_rad=1.30):
             lens_unit="FOV")
     except Exception as e:
         print(f"[hssd] 设广角跳过: {e}")
+
+
+def _stage_enclosure(geom):
+    """从地面网格点向上打射线，测"有多少比例的地面上方有遮盖(天花板/结构)"。
+
+    开放/破损 stage（只有一块悬空地板、HDRI 从上方/四周露出）→ 上射线大多逃逸到天空 → 比例很低。
+    完整房间 → 大多撞到天花板 → 比例高。返回 up_ratio∈[0,1]，拿不到几何时返回 1.0（不拦）。
+    """
+    try:
+        import bpy
+        scene = bpy.context.scene
+        deps = bpy.context.evaluated_depsgraph_get()
+        bmin, bmax = geom.get("bounds_min"), geom.get("bounds_max")
+        if not bmin or not bmax:
+            return 1.0
+        ground = float(geom.get("ground_z", bmin[2]))
+        room_h = float(bmax[2] - ground)
+        hit_n = tot = 0
+        for fx in (0.2, 0.4, 0.6, 0.8):
+            for fy in (0.2, 0.4, 0.6, 0.8):
+                p = [bmin[0] + fx * (bmax[0] - bmin[0]),
+                     bmin[1] + fy * (bmax[1] - bmin[1]), ground + 0.3]
+                res = scene.ray_cast(deps, p, (0.0, 0.0, 1.0))
+                hit, loc = res[0], res[1]
+                tot += 1
+                # 撞到东西、且在房间高度内(+余量) → 算"上方有遮盖"(天花板或高家具)
+                if hit and (float(loc[2]) - ground) <= room_h + 0.5:
+                    hit_n += 1
+        return hit_n / max(1, tot)
+    except Exception as e:
+        print(f"[hssd] 封闭性检测跳过: {e}")
+        return 1.0
 
 
 def _bbox_radius(obj):
