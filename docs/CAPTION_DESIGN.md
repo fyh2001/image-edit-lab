@@ -48,19 +48,27 @@ VLM captioner **看 before/after 图**把事实说成自然话（补视觉 groun
 
 ### SCALE（缩放）
 - 直接：make the X bigger/smaller；enlarge/shrink
-- 比较/目标：twice as big；the X is too small；make it the size of the Y；再大一点
+- **数值**：**放大1.5倍**；**缩小到一半**；twice as big；缩小到原来的0.75倍
+- 定性/比较：the X is too small；make it the size of the Y；再大一点
 - 意图：I want a bigger X
-- **需要**：factor + 方向 + （可选）相对某物尺寸 ✅ 已有
+- **需要**：factor（精确）+ `factor_is_round`（是否敢报数）+ 定性档 slightly/moderately/much ✅ 已有
+- **注**：数值 caption 要诚实——采样已**离散化**（`scale_choices` 整齐倍数为主 + `continuous_fraction`
+  留连续）：整齐倍数才报"1.5倍"，连续的只说"明显放大"，绝不在 1.47× 的图上写"1.5倍"。
 
 ### ROTATE（旋转，表达最丰富）
-- 直接：rotate / turn the X；turn it 90°
-- **视角目标（相对观者）**：**我想看 X 的侧面 / 背面 / 正面**；turn the X to face me；
+- 直接：rotate / turn the X
+- **数值**：**顺时针转90度**；rotate it 90° clockwise；逆时针180度
+- **视角目标（相对观者）**：**我想看 X 的侧面 / 背面**；turn the X to face me；
   **把电视的背面对着我**；let me see the other side；转一下让我看看后面
 - **语义朝向（相对他物）**：make the chair **face the table**；turn the sofa **toward the window**
 - 意图：I want to see it from another angle；转个身
-- **需要**：axis + angle + **相机相对视角变化**(view_change：opposite_side/side_face/partial，本次已补) +
-  （可选）朝向某物；front/back/side 的**命名交给看图 VLM**（它能认出"这是电视背面"）
-- **注**：绕竖轴 180°→"露出相反的一面"，VLM 补"背面对着你"；90°→"露出侧面"→"看侧面"
+- **需要**：axis + angle + **相机相对视角变化**(view_change：opposite_side/side_face/partial) +
+  **相机相对顺逆**(turn_direction) + `angle_is_round`；front/back/side 的**命名交给看图 VLM**
+- **注**：
+  - 采样已**离散化**（`angle_choices` 整齐角度为主）：整齐角度才报"90度"，连续的只说视角/定性。
+  - **顺逆取决于视角**：只有旋转轴≈沿视线（正对你的钟面/画）时 turn_direction 才非空，能说"顺时针"；
+    轴≈垂直视线（竖轴 yaw + 水平相机）时顺逆无意义 → 用 view_change 说"露侧面/背面对着我"。
+  - 绕竖轴 180°→"露出相反的一面"→VLM 补"背面对着你"；90°→"露出侧面"→"看侧面"。
 
 ### REPLACE（替换）
 - 直接：replace / swap / change X with/for/into Y
@@ -71,10 +79,18 @@ VLM captioner **看 before/after 图**把事实说成自然话（补视觉 groun
 ---
 
 ## 从谱系倒推的 metadata 缺口（worker 侧要补的事实）
-1. **rotate 相机相对视角变化**（view_change）→ ✅ 本次已补（`_rotate_view_change`）
-2. **move/add 的地标关系**（挨着哪个物体、靠哪面墙）→ 可补：主体最近的同框物体/结构件
-3. **属性**（颜色/材质）→ 从 objaverse tags / HSSD name 提，供属性消歧
-4. **朝向某物**（chair faces table）→ 需物体正面向量，较难；一期靠 VLM 看图推
+1. **rotate 相机相对视角变化**（view_change）→ ✅ 已补（`_rotate_view_change`）
+2. **rotate 相机相对顺逆**（turn_direction）+ **角度/倍数整齐标记**（angle_is_round/factor_is_round）
+   + scale/rotate 采样**离散化**（整齐值为主）→ ✅ 已补
+3. **move/add 的地标关系**（挨着哪个物体、靠哪面墙）→ 可补：主体最近的同框物体/结构件
+4. **属性**（颜色/材质）→ 从 objaverse tags / HSSD name 提，供属性消歧
+5. **朝向某物**（chair faces table）→ 需物体正面向量，较难；一期靠 VLM 看图推
+
+## 语言：中文为主 + 英文少量（不必每条双语）
+Qwen-Image-Edit 中英**共享文本空间**，编辑技能靠视觉 grounding、基本语言无关 → 中文学到的技能
+能部分迁移到英文。所以**不必每条双语**（会摊薄每种语言覆盖）：**主语言集中 + 另一语言少量掺入**
+（防微调时遗忘、保双语可用）。默认 `lang_weights: {zh: 0.8, en: 0.2}`，按亏空采样均衡，
+`caption_lang` 写回元数据。改部署语言就调 `lang_weights`。VLM 直接按目标语言生成（无机翻噪声）。
 
 ## 一对几条 caption？→ **一对一条 + 数据集级风格均衡**（已定）
 训练主集**每对只出一条**，captioner 按权重随机挑一种风格生成，并把 `style` 标签写进 metadata。

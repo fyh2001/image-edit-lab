@@ -54,6 +54,25 @@ def _rotate_view_change(axis, degrees):
     return {"kind": "tipped", "about": "horizontal", "degrees": round(d, 1)}
 
 
+def _rotate_turn_direction(axis_vec, ang, view=0):
+    """相机相对的**顺时针/逆时针**（客观事实，供 "顺时针转90度" 类 caption）。
+
+    顺逆**取决于视角**：只有当旋转轴大致**朝向/背离相机**（沿视线）时才有意义（像正对你的钟面）；
+    轴与视线近垂直（如竖轴 yaw + 水平相机）时顺逆无意义 → 返回 None，改由 view_change 表达。
+    右手定则：绕轴正转，从轴尖端回看是逆时针。相机看向 forward，故 clockwise ⇔ (ang·dot(forward,axis))>0。
+    """
+    try:
+        _r, _u, fwd = camera_basis(view)
+    except Exception:
+        return None
+    a = np.asarray(axis_vec, dtype=float)
+    a = a / (np.linalg.norm(a) + 1e-9)
+    d = float(np.dot(np.asarray(fwd, dtype=float), a))
+    if abs(d) < 0.7:                              # 轴≈垂直于视线 → 顺逆无意义
+        return None
+    return "clockwise" if (ang * d) > 0 else "counterclockwise"
+
+
 def _maybe_spawn_subject(op, ctx):
     """按 `subject_source` 权重选主体来源，再让算子对它变换。三种模式混着产：
       - scene   ：直接编辑场景**已有物体**（真实分布，默认）
@@ -204,15 +223,27 @@ class ScaleEdit(EditOperator):
         baseline = validity.contacts(obj, ctx.all_objects)   # 原场景就接触的邻居，编辑后忽略
 
         chosen = {}
+        # 整齐倍数为主(让"放大1.5倍/缩小到一半"类数值 caption 成立) + 少量连续。
+        scale_choices = self.params.get("scale_choices")          # 如 [0.5, 0.75, 1.25, 1.5, 2.0]
+        cont_frac = float(self.params.get("continuous_fraction", 0.3))
 
         def sample():
             grow = (rng.uniform() < 0.5) if (can_grow and can_shrink) else can_grow
-            if grow and can_grow:
-                f = float(rng.uniform(1.0 + min_delta, hi))
-            elif can_shrink:
-                f = float(rng.uniform(lo, 1.0 - min_delta))
-            else:
-                f = float(rng.uniform(lo, hi))   # 兜底：范围本身就在 1.0 附近
+            pool = None
+            if scale_choices and rng.uniform() >= cont_frac:      # 采整齐倍数(合方向 + 满足最小变化)
+                pool = [float(c) for c in scale_choices
+                        if (c >= 1.0 + min_delta if grow else c <= 1.0 - min_delta)]
+            if pool:
+                f = float(rng.choice(pool))
+                chosen["round"] = True
+            else:                                                 # 连续兜底
+                if grow and can_grow:
+                    f = float(rng.uniform(1.0 + min_delta, hi))
+                elif can_shrink:
+                    f = float(rng.uniform(lo, 1.0 - min_delta))
+                else:
+                    f = float(rng.uniform(lo, hi))   # 兜底：范围本身就在 1.0 附近
+                chosen["round"] = False
             chosen["f"] = f
             obj.set_scale((cur * f).tolist())
             # 锚定底部中心：缩放后把底部拉回原底高，避免穿地/悬空
@@ -249,6 +280,7 @@ class ScaleEdit(EditOperator):
         meta = {
             "op": "object_scale", "noun": n,
             "factor": round(f, 4), "per_axis": [round(f, 4)] * 3,
+            "factor_is_round": bool(chosen.get("round")),   # 整齐倍数 → caption 敢报"1.5倍"
             "uniform": True, "anchor": "bottom_center", "reseated": True,
             "validity": {"strategy": "analytic", "num_attempts": attempts,
                          "collision_free": True, "reseated": True},
@@ -280,11 +312,18 @@ class RotateEdit(EditOperator):
         chosen = {}
 
         min_deg = float(self.params.get("min_degrees", 15))
+        # 整齐角度为主(让"顺时针90度"类数值 caption 成立) + 少量连续(视觉多样性)。
+        angle_choices = self.params.get("angle_choices")          # 如 [45, 90, 135, 180]
+        cont_frac = float(self.params.get("continuous_fraction", 0.3))
 
         def sample():
             axis = str(rng.choice(allowed))
-            # 采"有意义"的角度幅值（避开 ~0° 的不可见小旋转），符号随机
-            mag = float(rng.uniform(min_deg, max_deg))
+            if angle_choices and rng.uniform() >= cont_frac:      # 采整齐角度
+                mag = float(rng.choice(angle_choices))
+                chosen["round"] = True
+            else:                                                 # 采"有意义"的连续幅值(避开~0°小旋转)
+                mag = float(rng.uniform(min_deg, max_deg))
+                chosen["round"] = False
             sign = 1.0 if rng.uniform() < 0.5 else -1.0
             ang = math.radians(sign * mag)
             chosen["axis"], chosen["ang"] = axis, ang
@@ -323,6 +362,9 @@ class RotateEdit(EditOperator):
             # 相机相对视角变化（纯几何，正确）：绕竖轴(Z)转 → 换成对镜头的另一面；
             # front/back/side 的语义命名交给看图的 VLM captioner，这里只给客观事实。
             "view_change": _rotate_view_change(axis, deg),
+            # 相机相对顺逆(仅轴≈沿视线时非 None) + 是否整齐角度(供数值 caption 决定敢不敢报数)。
+            "turn_direction": _rotate_turn_direction(self.AXES[axis], ang),
+            "angle_is_round": bool(chosen.get("round")),
             "reseated": reseated,
             "final_transform": transform_dict(obj),
             "validity": {"strategy": "analytic", "num_attempts": attempts,

@@ -32,6 +32,30 @@ def allowed_styles(op):
     return [s for s in STYLES if s not in blocked]
 
 
+# ---- 语言旋钮 ----------------------------------------------------------------
+# Qwen-Image-Edit 中英双语共享文本空间；编辑技能靠视觉 grounding、基本语言无关。故**不必每条双语**：
+# 主语言集中 + 另一语言少量掺入（防遗忘、保双语可用），比全双语摊薄覆盖更好。默认中文为主。
+LANGUAGES = ["zh", "en"]
+DEFAULT_LANG_WEIGHTS = {"zh": 0.8, "en": 0.2}
+
+
+def sample_language(rng, counts, weights=None):
+    """按权重亏空采样一种语言（同 sample_style 思路，跨数据集均衡）。counts:{lang:已产条数}。"""
+    w = dict(DEFAULT_LANG_WEIGHTS)
+    for k, v in (weights or {}).items():
+        if k in w:
+            w[k] = max(0.0, float(v))
+    cand = [l for l in LANGUAGES if w.get(l, 0.0) > 0.0]
+    if not cand:
+        return "zh"
+    total = sum(counts.get(l, 0) for l in cand)
+    wsum = sum(w[l] for l in cand)
+    deficits = [max(0.0, (w[l] / wsum) * (total + 1) - counts.get(l, 0)) for l in cand]
+    dsum = sum(deficits)
+    probs = [d / dsum for d in deficits] if dsum > 1e-9 else [w[l] / wsum for l in cand]
+    return cand[int(rng.choice(len(cand), p=probs))]
+
+
 def normalize_weights(weights=None):
     """把用户权重并进默认表，负数/缺失归零；返回覆盖所有 STYLES 的 dict。"""
     w = dict(DEFAULT_WEIGHTS)

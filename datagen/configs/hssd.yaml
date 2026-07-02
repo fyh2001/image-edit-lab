@@ -23,9 +23,11 @@ ray:                          # 通用流式执行器（orchestrator/ray_runner.
 
 # 后处理算子链：render 全跑完后依次执行（reduce/sink，对整批产物操作一次）
 pipeline:
-  # ① 打标：把模板指令改写成自然、语义化的一条 caption（每对一条 + 风格均衡，写回 sample.json）。
+  # ① 打标：把模板指令改写成自然、语义化的一条 caption（每对一条 + 风格/语言均衡，写回 sample.json）。
   #    provider=stub 无网络先跑通；接 Qwen-VL 时换 provider: qwen_vl + use_images: true（并给 caption 档配 GPU）。
-  - {type: vlm_caption, profile: caption, params: {provider: stub, seed: 0}}
+  #    lang_weights：中文为主 + 英文少量（防遗忘、保双语可用）；改部署语言就调这里。
+  - {type: vlm_caption, profile: caption,
+     params: {provider: stub, seed: 0, lang_weights: {zh: 0.8, en: 0.2}}}
   # ② 打包：产物（优先用 caption）→ HF Parquet（带 Image 特征 + split）。
   - {type: pack_parquet, profile: pack}
   # ③ 想自动上传就取消注释（需 hf auth login；parquet_dir 由上一步自动喂入）：
@@ -76,12 +78,19 @@ edits:
     # subject_source：主体来源三模式混合（scene 直接编辑已有 / spawn 加外部物到空表面 /
     # replace 用外部物替换已有物槽位），再对该主体做变换。想全直接编辑就设 {scene: 1}。
     object_scale:
-      scale_range: [0.6, 1.5]
+      scale_range: [0.5, 2.0]
+      # 整齐倍数为主(让"放大1.5倍/缩小到一半"类数值 caption 成立)+ continuous_fraction 留连续做视觉多样性
+      scale_choices: [0.5, 0.75, 1.25, 1.5, 2.0]
+      continuous_fraction: 0.3
       subject_source: {scene: 0.5, spawn: 0.25, replace: 0.25}
     object_rotate:
       min_degrees: 30
-      max_degrees: 90
+      max_degrees: 180
       axes: ["Z"]
+      # 整齐角度为主(让"顺时针转90度"类数值 caption 成立);angle_choices 不受 min/max 限制,
+      # min/max 仅管 continuous_fraction 那部分连续采样。180 → 背面对镜头(opposite_side)。
+      angle_choices: [45, 90, 135, 180]
+      continuous_fraction: 0.3
       subject_source: {scene: 0.5, spawn: 0.25, replace: 0.25}
     object_replace:
       # same_category_prob: 换成同类的概率。0=全换不同类(含跨域"落地灯→镲片"，故意保留：

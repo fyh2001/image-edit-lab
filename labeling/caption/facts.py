@@ -22,6 +22,26 @@ def _ref_phrase(base_instruction, noun):
     return "the " + (noun or "object")
 
 
+_NICE_FACTORS = [0.25, 0.5, 0.75, 1.25, 1.5, 2.0, 3.0]
+
+
+def _scale_bucket(f):
+    """把倍数折成定性档：slightly / moderately / much（放大缩小都按"变化几倍"算）。"""
+    r = f if f >= 1.0 else (1.0 / f if f > 0 else 1.0)
+    return "much" if r >= 1.9 else "moderately" if r >= 1.4 else "slightly"
+
+
+def _is_round_factor(f):
+    return any(abs(f - x) < 0.02 for x in _NICE_FACTORS)
+
+
+def _shrink_times(f):
+    """缩小倍数：0.5→2（"缩小2倍"/"缩到一半"）。取最接近的整齐说法。"""
+    if f <= 0:
+        return None
+    return round(1.0 / f, 2)
+
+
 def _location_tail(base_instruction):
     """从基线指令里抠出落位/目标短语（"... on top of the couch" / "... onto the floor"）。"""
     if not base_instruction:
@@ -51,13 +71,23 @@ def extract_facts(sample):
         f["placement"] = edit.get("placement_mode")
     elif op == "object_rotate":
         f["view_change"] = edit.get("view_change") or {}
-        f["degrees"] = edit.get("degrees")
+        deg = edit.get("degrees")
+        f["degrees"] = deg
+        f["abs_degrees"] = abs(float(deg)) if deg is not None else None
         f["axis"] = edit.get("axis")
+        f["turn_direction"] = edit.get("turn_direction")          # clockwise/counterclockwise/None
+        f["angle_round"] = bool(edit.get("angle_is_round"))       # 敢不敢报具体度数
     elif op == "object_scale":
         factor = edit.get("factor")
         f["scale_factor"] = factor
         if factor is not None:
-            f["scale_dir"] = "bigger" if float(factor) > 1.0 else "smaller"
+            ff = float(factor)
+            f["scale_dir"] = "bigger" if ff > 1.0 else "smaller"
+            f["scale_bucket"] = _scale_bucket(ff)                 # slightly/moderately/much
+            # 敢不敢报"1.5倍"：优先信 worker 的 factor_is_round，缺则按整齐值近似判。
+            fr = edit.get("factor_is_round")
+            f["factor_round"] = _is_round_factor(ff) if fr is None else bool(fr)
+            f["shrink_times"] = _shrink_times(ff) if ff < 1.0 else None
     elif op == "object_replace":
         frm = edit.get("from") or {}
         to = edit.get("to") or {}
