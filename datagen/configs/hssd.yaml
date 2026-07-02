@@ -115,12 +115,14 @@ instruction:
 
 render:
   backend: "cycles_gpu"
-  resolution: [512, 512]
+  resolution: [768, 768]       # 512 放大看发糊；768 清晰不少。想更精细可上 [1024,1024]（更慢/更占存储）。
   samples: 128                 # 高一点去噪后不塑料（H100 上很便宜）；OPTIX 降噪兜底
   pairs_per_scene: 12          # 摊销加载：一间房 load 一次 → 产多对（换家具/机位/算子）
   global_illumination: "full"
   view_transform: "AgX"        # 色彩管理：高光滚降，少 CG 多照片（Standard 会死白发假）
-  dof: {fstop: 3.5}            # 景深：聚焦主体、虚化远背景（真实感）。删掉本行即关景深。
+  # 景深：f 越小越虚。f/3.5 太浅会把广角室内整体拍糊；f/8 只极轻软化最远/最近，主体保持清晰。
+  # 训练数据建议 f/8 或删掉本行（关景深），别把待编辑物体虚掉。
+  dof: {fstop: 8.0}
   # Cycles 真实感/降噪（安全，不破坏对齐）：
   noise_threshold: 0.01        # 自适应采样：够干净就停，省时
   clamp_indirect: 10.0         # 钳制间接亮样本，灭 fireflies 噪点
