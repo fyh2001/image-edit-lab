@@ -14,9 +14,29 @@ from datagen.worker.render.base import RenderBackend
 from datagen.worker.registry import register_backend
 
 
+def _set_color_management(render_cfg: Dict[str, Any]):
+    """色彩管理：默认 AgX（Blender 4.x）——高光像真相机一样滚降，"少 CG 多照片"。
+
+    可 config 覆盖：view_transform(AgX/Filmic/Standard)、look(对比度档)、exposure、gamma。
+    BlenderProc 有时把 view_transform 留成 Standard/Raw → 高光死白、发假；这里显式设回 AgX。
+    """
+    try:
+        import bpy
+        vs = bpy.context.scene.view_settings
+        vs.view_transform = str(render_cfg.get("view_transform", "AgX"))
+        look = render_cfg.get("look")
+        if look is not None:
+            vs.look = str(look)                         # 如 "AgX - Medium Contrast"
+        vs.exposure = float(render_cfg.get("exposure", 0.0))
+        vs.gamma = float(render_cfg.get("gamma", 1.0))
+    except Exception as e:
+        print(f"[render] 色彩管理设置跳过: {e}")
+
+
 def _common_setup(render_cfg: Dict[str, Any]):
     res = render_cfg.get("resolution", [768, 768])
     bproc.camera.set_resolution(res[0], res[1])
+    _set_color_management(render_cfg)
     # BlenderProc 在 init 时设了 render.use_persistent_data=True（缓存渲染数据库以提速）。
     # 但本管线在两次 render() 之间切换物体可见性（object_add 先隐藏再显示），持久化缓存
     # 不会因 hide_render 变化而失效 → before/after 完全相同。这里关掉它，保证每次渲染都

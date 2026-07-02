@@ -42,6 +42,12 @@ scene:
 
 # HSSD 家具就是主体来源；objaverse 仅供 replace 取新物体
 assets:
+  # HDRI 图像照明（真实光色/方向/反射，脱 CG 平光感）；无 .hdr 文件会自动退平光。
+  # 下载室内 HDRI： python -m datagen.orchestrator.prefetch_hdri
+  environment:
+    provider: "haven"
+    params:
+      hdri_dir: "./assets/haven/hdris"
   subject:
     provider: "objaverse"
     params:

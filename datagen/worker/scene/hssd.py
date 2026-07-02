@@ -14,7 +14,7 @@ import numpy as np
 import blenderproc as bproc
 
 from datagen.worker.scene.base import SceneBuilder
-from datagen.worker.registry import register_scene
+from datagen.worker.registry import register_scene, build
 
 # Y-up → Z-up： (x,y,z) -> (x,-z,y)
 _C = np.array([[1, 0, 0, 0], [0, 0, -1, 0], [0, 1, 0, 0], [0, 0, 0, 1]], dtype=float)
@@ -87,7 +87,7 @@ class HSSDScene(SceneBuilder):
         ctx.extras["scene_geom"] = _room_geom(stage_objs or editable)
         ctx.extras["subject_support"] = "ground"
         ctx.extras["ground"] = stage_objs[0] if stage_objs else None
-        _add_fill_light(ctx.extras["scene_geom"])
+        _setup_lighting(ctx, ctx.extras["scene_geom"])
 
         # 5) 相机：广角 + 站房间边缘朝主体拍（把整间房带进画面）
         geom = ctx.extras["scene_geom"]
@@ -301,6 +301,72 @@ def _set_world_ambient(strength=0.5, color=(1.0, 0.98, 0.95)):
         bg.inputs[1].default_value = float(strength)
     except Exception as e:
         print(f"[hssd] 环境光跳过: {e}")
+
+
+def _setup_lighting(ctx, geom):
+    """房间照明。两种模式（config `assets.environment` 决定）：
+
+      - **hdri**（推荐，真实感）：HDRI 图像照明（真实光色/方向/反射）+ 一盏固定方向光（接触阴影/
+        对比，脱平光的 CG 感）+ 很弱的面光兜底（enclosed 房间防暗角纯黑）。世界平 ambient 调很低。
+      - **flat**（兜底）：原来的天花板网格面光 + 0.5 世界 ambient（均匀但发假）。
+
+    固定光在 before/after 不变 → 不破坏"只有主体变"的对齐（主体移动带来的阴影变化是物理正确的）。
+    """
+    env_cfg = {}
+    try:
+        env_cfg = ctx.spec.assets.get("environment") or {}
+    except Exception:
+        env_cfg = {}
+
+    if env_cfg.get("provider"):
+        try:
+            env = build("asset", env_cfg["provider"], **env_cfg.get("params", {}))
+            env.apply(ctx)                                # 设 HDRI 世界背景（或其兜底平世界光）
+            _add_sun_and_fill(geom, ctx.rng)             # 方向光 + 极弱面光兜底
+            _set_world_ambient(0.08)                     # 平 ambient 压到很低，让 HDRI/太阳主导明暗
+            ctx.extras["lighting"] = "hdri"
+            return
+        except Exception as e:
+            print(f"[hssd] HDRI 照明失败，回退平光: {e}")
+
+    _add_fill_light(geom)                                 # 兜底：原平光
+    ctx.extras["lighting"] = "flat"
+
+
+def _add_sun_and_fill(geom, rng):
+    """方向性太阳光（给明暗/接触阴影）+ 天花板几盏很弱的面光（防 enclosed 房间暗角纯黑）。"""
+    try:
+        bmin = geom.get("bounds_min") or [-3, -3, 0]
+        bmax = geom.get("bounds_max") or [3, 3, 3]
+        ground = float(geom.get("ground_z", bmin[2]))
+        ceil = float(geom.get("ceiling_z") or (ground + 3.0))
+        cx = 0.5 * (bmin[0] + bmax[0])
+        cy = 0.5 * (bmin[1] + bmax[1])
+        # 固定太阳（能量/角度略随机 → 光照多样性），从上方斜射给方向性明暗。
+        sun = bproc.types.Light()
+        sun.set_type("SUN")
+        sun.set_energy(float(rng.uniform(2.5, 4.5)))
+        sun.set_location([cx + 2, cy - 2, ceil + 2])
+        sun.set_rotation_euler([float(rng.uniform(0.3, 0.7)),
+                                float(rng.uniform(0.1, 0.4)),
+                                float(rng.uniform(0.0, 6.283))])
+        # 极弱面光兜底（比原来暗一个量级，只抬死黑不抹平方向感）
+        sx, sy = float(bmax[0] - bmin[0]), float(bmax[1] - bmin[1])
+        nx, ny = max(1, int(round(sx / 4.0))), max(1, int(round(sy / 4.0)))
+        for i in range(nx):
+            for j in range(ny):
+                x = bmin[0] + (i + 0.5) * sx / nx
+                y = bmin[1] + (j + 0.5) * sy / ny
+                light = bproc.types.Light()
+                light.set_type("AREA")
+                light.set_location([x, y, ceil - 0.15])
+                light.set_energy(float(np.clip(20.0 * (sx / nx) * (sy / ny), 60.0, 250.0)))
+                try:
+                    light.blender_obj.data.size = min(3.0, 0.9 * min(sx / nx, sy / ny))
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[hssd] 方向光/兜底面光跳过: {e}")
 
 
 def _add_fill_light(geom):
