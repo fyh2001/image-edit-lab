@@ -97,6 +97,16 @@ def run_stream(tasks, resources=None, max_in_flight=8, task_modules=None,
     return {"done": n_done, "ok": n_ok, "fail": n_fail}
 
 
+def run_one(task, resources=None, task_modules=None):
+    """跑**单个**任务并返回其结果（用于 reduce/sink 型算子，如 pack/upload——对整批产物操作一次）。"""
+    import ray
+    resources = resources or {}
+    r = _res_for(task.get("profile", "default"), resources)
+    fut = ray.remote(_run_task).options(
+        num_cpus=r["num_cpus"], num_gpus=r["num_gpus"]).remote(task, task_modules)
+    return ray.get(fut)
+
+
 # ============ 流式（增量）：一个任务边跑边吐多个结果，driver 逐个实时消费 ============
 STREAM_REGISTRY = {}
 

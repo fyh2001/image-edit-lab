@@ -17,6 +17,14 @@ ray:                          # 通用流式执行器（orchestrator/ray_runner.
   resources:                  # 每档资源（GPU 来自渲染，所有算子都渲）
     default: {num_cpus: 2, num_gpus: 1}
     hssd:    {num_cpus: 4, num_gpus: 1}   # 大房间加载重，多给 CPU（profile_by=scene→按场景名）
+    pack:    {num_cpus: 2, num_gpus: 0}   # 打包/上传是 CPU 活，不占卡
+    upload:  {num_cpus: 1, num_gpus: 0}
+
+# 后处理算子链：render 全跑完后依次执行（reduce/sink，对整批产物操作一次）
+pipeline:
+  - {type: pack_parquet, profile: pack}          # 原始产物 → HF Parquet（带 Image 特征 + split）
+  # 想自动上传就取消注释（需 hf auth login；parquet_dir 由上一步自动喂入）：
+  # - {type: upload_hf, profile: upload, params: {repo_id: fyh2001/obj-edits-hssd-v1, private: false}}
 
 scene:
   name: "hssd"

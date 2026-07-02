@@ -177,6 +177,12 @@ Management 保护，需 `xattr -dr com.apple.provenance <Blender.app>` 解保护
         `staged`（批式between/流式within，A 全好才开 B、资源不跨阶段争、稳）| `streaming`（完全流式，
         一项过完 A 立刻进 B、阶段重叠、延迟低）。asyncio 队列 + 每阶段 worker 池 + DONE 传播。
         两模式 noop 阶段验证结果一致、streaming 更快（重叠）。
+      - **后处理算子（打包/上传）+ pipeline 编排**：把手动的打包/上传做成 reduce/sink 型算子
+        （`datagen/orchestrator/tasks/postprocess.py`：`pack_parquet` / `pack_webdataset` / `upload_hf`，
+        `@register_task`）。config 的 `pipeline:` 声明 render 后依次跑的算子链（`ray_exec.run_one`
+        跑单个、上一步输出喂下一步，如 pack 的 parquet_dir→upload）。ray_runner 两种 render 路径跑完
+        都接后处理 pipeline。实测 smoke: render 3 对 → 自动 pack_parquet → train.parquet(可 load)。
+        upload 在 config 里 opt-in（需 hf auth login）。`export_hf` 抽出 `build_dataset/save_parquet` 复用。
 - [ ] **domain gap**：渲染→提真（img2img/扩散）后处理，对 before/after 用同一结构
       约束保持对齐；先在小批上验证真实照片迁移效果。
 

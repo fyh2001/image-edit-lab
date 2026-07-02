@@ -89,6 +89,27 @@ def _features():
     })
 
 
+def build_dataset(raw_dir, holdout_scenes=None):
+    """原始产物 → HF DatasetDict（带 Image 特征 + 场景级 split）。CLI 与 pack 算子共用。"""
+    from datasets import Dataset, DatasetDict
+    by_split = build_rows(raw_dir, holdout_scenes)
+    feats = _features()
+    dd = DatasetDict({s: Dataset.from_list(rows, features=feats)
+                      for s, rows in by_split.items() if rows})
+    return dd
+
+
+def save_parquet(dd, out_dir):
+    """DatasetDict → 本地 parquet（每 split 一个文件）。返回 {split: path}。"""
+    os.makedirs(out_dir, exist_ok=True)
+    paths = {}
+    for s, ds in dd.items():
+        p = os.path.join(out_dir, f"{s}.parquet")
+        ds.to_parquet(p)
+        paths[s] = p
+    return paths
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--raw-dir", default="out/hssd_raw")
@@ -100,30 +121,17 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="只本地生成 parquet，不联网")
     args = ap.parse_args()
 
-    from datasets import Dataset, DatasetDict
-
-    by_split = build_rows(args.raw_dir, args.holdout_scenes)
-    feats = _features()
-    dd = DatasetDict({s: Dataset.from_list(rows, features=feats)
-                      for s, rows in by_split.items() if rows})
-
-    # 统计
-    print("[export] split / 样本数：", {s: len(rows) for s, rows in by_split.items()})
+    dd = build_dataset(args.raw_dir, args.holdout_scenes)
+    print("[export] split / 样本数：", {s: len(ds) for s, ds in dd.items()})
     for s, ds in dd.items():
-        ops = collections.Counter(ds["edit_op"])
-        scenes = sorted(set(ds["scene_id"]))
-        print(f"  {s}: {len(ds)} | 场景 {scenes} | 算子 {dict(ops)}")
+        print(f"  {s}: {len(ds)} | 算子 {dict(collections.Counter(ds['edit_op']))}")
 
     if args.repo_id and not args.dry_run:
         dd.push_to_hub(args.repo_id, private=args.private)
-        print(f"[export] 已推送 → https://huggingface.co/datasets/{args.repo_id}"
-              f"（自动出 Dataset Viewer + load_dataset）")
+        print(f"[export] 已推送 → https://huggingface.co/datasets/{args.repo_id}")
     else:
-        os.makedirs(args.out, exist_ok=True)
-        for s, ds in dd.items():
-            path = os.path.join(args.out, f"{s}.parquet")
-            ds.to_parquet(path)
-            print(f"[export] {s} → {path}")
+        for s, p in save_parquet(dd, args.out).items():
+            print(f"[export] {s} → {p}")
         print("[export] dry-run（未上传）。推送：--repo-id <user>/<dataset>（需 hf auth login）")
 
 
