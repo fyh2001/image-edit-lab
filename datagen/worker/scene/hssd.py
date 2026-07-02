@@ -83,6 +83,10 @@ class HSSDScene(SceneBuilder):
                 ctx.register_object(o, is_subject=False)
         ctx.extras["distractor_categories"] = [_cp(o, "category") for o in ctx.distractors]
 
+        # 3b) 材质真实感：抬粗糙度地板 + 极轻微观 bump，破掉"完美光滑平面"的塑料 CG 感。
+        # 在建场景时一次性做 → before/after 共享同一材质，不破坏对齐。
+        _add_surface_detail((stage_objs or []) + editable, rng, p)
+
         # 4) 房间几何（用 stage 包围盒）+ 室内灯
         ctx.extras["scene_geom"] = _room_geom(stage_objs or editable)
         ctx.extras["subject_support"] = "ground"
@@ -225,6 +229,60 @@ _NEUTRAL_PALETTE = [
     (0.82, 0.80, 0.76), (0.70, 0.68, 0.64), (0.56, 0.52, 0.46),
     (0.45, 0.34, 0.24), (0.33, 0.25, 0.18), (0.58, 0.60, 0.63), (0.78, 0.74, 0.68),
 ]
+
+
+def _add_surface_detail(objs, rng, params):
+    """材质真实感 pass：给场景所有材质抬粗糙度地板 + 加极轻微观 bump，破掉"完美光滑平面"的
+    塑料 CG 感（研究建议：完美表面显假，需 roughness/soft-bump/imperfection）。
+
+    确定性地在**建场景时一次**做完，before/after 共享同一批材质 → 不破坏"只有主体变"的对齐。
+    可 config 关：scene.params.surface_detail=false。roughness_floor / micro_bump 可调。
+    """
+    if not params.get("surface_detail", True):
+        return
+    rough_floor = float(params.get("roughness_floor", 0.4))
+    bump_strength = float(params.get("micro_bump", 0.12))
+    seen = set()
+    for obj in objs:
+        try:
+            for mat in obj.blender_obj.data.materials:
+                if mat is None or not mat.use_nodes or mat.name in seen:
+                    continue
+                seen.add(mat.name)
+                _detail_one_material(mat, rng, rough_floor, bump_strength)
+        except Exception:
+            pass
+
+
+def _detail_one_material(mat, rng, rough_floor, bump_strength):
+    import bpy  # noqa
+    nt = mat.node_tree
+    bsdf = next((n for n in nt.nodes if n.type == "BSDF_PRINCIPLED"), None)
+    if bsdf is None:
+        return
+    # 1) 抬粗糙度地板（只在没接贴图时能安全设常量；接了 roughness 贴图的不动）
+    rin = bsdf.inputs.get("Roughness")
+    if rin is not None and not rin.is_linked:
+        cur = float(rin.default_value)
+        rin.default_value = float(np.clip(max(cur, rough_floor) + rng.uniform(-0.05, 0.1), 0.2, 1.0))
+    # 2) 微观 bump：Noise(细密) → Bump(极轻) → Normal，把完美平面揉皱一点点、打散镜面高光
+    if bump_strength <= 0:
+        return
+    nin = bsdf.inputs.get("Normal")
+    if nin is None:
+        return
+    noise = nt.nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Scale"].default_value = float(rng.uniform(200.0, 600.0))   # 细密微观纹理
+    try:
+        noise.inputs["Detail"].default_value = 2.0
+    except Exception:
+        pass
+    bump = nt.nodes.new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = float(bump_strength * rng.uniform(0.7, 1.3))
+    nt.links.new(noise.outputs["Fac"], bump.inputs["Height"])
+    if nin.is_linked:                              # 已有法线贴图 → bump 链在其后，保留原法线
+        nt.links.new(nin.links[0].from_socket, bump.inputs["Normal"])
+    nt.links.new(bump.outputs["Normal"], nin)
 
 
 def _neutralize(obj, rng):
