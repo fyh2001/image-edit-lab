@@ -1,0 +1,58 @@
+# 3D-FRONT 室内场景版配置：在真实房间布局里对家具做 6 类物体编辑。
+# 用法： python -m orchestrator.ray_runner --config configs/front3d.yaml
+
+run:
+  num_jobs: 64
+  base_seed: 20260630
+  output_dir: "./out/front3d_raw"
+  shard_dir: "./out/front3d_shards"
+  shard_size: 1000
+
+ray:
+  address: "auto"
+  num_cpus_per_job: 2
+  num_gpus_per_job: 1
+
+# ---- 换成 front3d 场景构建器（与 tabletop 并存，改 name 即可切换）----
+scene:
+  name: "front3d"
+  params:
+    camera_views: 1
+    # 3D-FRONT 三件套路径（各自下载后填这里）
+    front_json_dir: "./assets/3D-FRONT"
+    future_model_dir: "./assets/3D-FUTURE-model"
+    front_texture_dir: "./assets/3D-FRONT-texture"
+
+# front3d 场景的主体来自房间内家具，所以这里 subject 用不到；
+# 但 object_replace 仍可用 objaverse 拉新物体来替换家具。environment 也无需 HDRI。
+assets:
+  subject:
+    provider: "objaverse"          # 仅供 object_replace 在替换时取新物体
+    params:
+      uid_list: "./assets/objaverse_uids.txt"
+      local_cache: "./assets/objaverse"
+
+edits:
+  sampling_weights:
+    object_move: 1.0
+    object_scale: 1.0
+    object_rotate: 1.0
+    object_replace: 1.0
+    object_add: 1.0
+    object_delete: 1.0
+  params:
+    object_move:   {max_offset: 0.5}
+    object_scale:  {scale_range: [0.6, 1.5]}
+    object_rotate: {max_degrees: 180}
+    object_replace:
+      provider: "objaverse"
+      provider_params:
+        uid_list: "./assets/objaverse_uids.txt"
+        local_cache: "./assets/objaverse"
+
+render:
+  backend: "cycles_gpu"            # 室内场景真实感重要，建议直接 Cycles GPU
+  resolution: [768, 768]
+  samples: 128                     # 室内全局光照噪声大，采样比桌面场景调高
+  denoiser: "OPTIX"
+  transparent_bg: false

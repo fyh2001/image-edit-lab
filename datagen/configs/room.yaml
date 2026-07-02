@@ -1,0 +1,74 @@
+# 合成房间场景：零下载验证房间级放置模式（ceiling/wall/floating）。
+# 用法： python scripts/run_local.py --config configs/room.yaml --num-jobs 8
+
+run:
+  num_jobs: 8
+  base_seed: 100
+  output_dir: "./out/room_raw"
+  shard_dir: "./out/room_shards"
+  shard_size: 100
+
+ray:
+  address: "local"
+  num_cpus_per_job: 1
+  num_gpus_per_job: 0
+
+scene:
+  name: "room"
+  params:
+    width: 6.0
+    depth: 6.0
+    height: 3.0
+    num_distractors: [1, 2]
+    camera_views: 1
+
+assets:
+  subject:
+    provider: "primitives"          # 零下载
+    params:
+      kinds: ["CUBE", "SPHERE", "CYLINDER", "CONE", "MONKEY"]
+
+edits:
+  sampling_weights:
+    object_move: 1.0
+    object_scale: 1.0
+    object_rotate: 1.0
+    object_replace: 1.0
+    object_add: 1.0
+    object_delete: 1.0
+  params:
+    object_move:
+      # 房间里 5 种放置模式都可用；加权偏向 ceiling/wall/floating 以便重点验证
+      placement_weights:
+        support_surface: 1.0
+        object_top: 1.0
+        ceiling: 2.0
+        wall: 2.0
+        floating: 1.0
+    object_scale:
+      scale_range: [0.5, 1.6]
+    object_rotate:
+      min_degrees: 30
+      max_degrees: 80
+      axes: ["X", "Y"]
+    object_replace:
+      provider: "primitives"
+      provider_params:
+        kinds: ["CUBE", "SPHERE", "CYLINDER", "CONE", "MONKEY"]
+
+instruction:
+  frame: "scene_anchored"           # 房间级用场景锚定措辞（放到天花板/墙上/悬空）
+
+render:
+  backend: "cycles_gpu"
+  resolution: [512, 512]
+  samples: 32
+  global_illumination: "full"
+  min_pixel_change_ratio: 0.005
+  min_visible_fraction: 0.1
+  min_subject_area_ratio: 0.003
+  max_subject_area_ratio: 0.95
+  quality:
+    max_change_ratio: 0.9
+    min_sharpness: 3.0
+    max_background_diff: 3.0

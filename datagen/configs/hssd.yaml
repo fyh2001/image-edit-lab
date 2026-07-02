@@ -1,0 +1,101 @@
+# HSSD 真实室内场景：在 Habitat 合成房间里对家具做编辑。
+# 先 prefetch： python -m orchestrator.prefetch_hssd --scenes 102344115
+# 再跑：       python scripts/run_local.py --config configs/hssd.yaml --num-jobs 6
+
+run:
+  num_jobs: 6
+  base_seed: 200
+  output_dir: "./out/hssd_raw"
+  shard_dir: "./out/hssd_shards"
+  shard_size: 100
+
+ray:                          # 通用流式执行器（orchestrator/ray_runner.py）
+  address: "local"            # 单机；集群填 head 地址或 "auto"
+  max_in_flight: 8            # 有界在飞窗口（背压）——8×H100 上设 8，一卡一路
+  profile_by: "scene"         # scene | edit | fixed —— 用什么给 task 选资源档
+  task_timeout: 1800
+  resources:                  # 每档资源（GPU 来自渲染，所有算子都渲）
+    default: {num_cpus: 2, num_gpus: 1}
+    hssd:    {num_cpus: 4, num_gpus: 1}   # 大房间加载重，多给 CPU（profile_by=scene→按场景名）
+
+scene:
+  name: "hssd"
+  params:
+    data_dir: "./assets/hssd"
+    scene_id: null               # 留空 → 每个 job 从已下载的房间里随机选（多样性）
+    camera_views: 1
+
+# HSSD 家具就是主体来源；objaverse 仅供 replace 取新物体
+assets:
+  subject:
+    provider: "objaverse"
+    params:
+      uid_list: "./assets/objaverse_uids.txt"
+      local_cache: "./assets/objaverse"
+      category_map: "./assets/objaverse_categories.json"
+
+edits:
+  # sampling_weights 现在是**目标产出占比**（run_job 用亏空采样命中，自动补偿各算子 yield 差异）。
+  # 均衡 = 全部相等；想某算子多就调高它的数。（旧语义"尝试权重"已弃用。）
+  sampling_weights:
+    object_delete: 1.0
+    object_replace: 1.0
+    object_scale: 1.0
+    object_rotate: 1.0
+    object_move: 1.0
+    object_add: 1.0
+  params:
+    object_move:
+      # object_top = 表面感知放置：把够小的家具挪到桌面/台面/柜顶（放不下自动回退到地面）
+      placement_weights: {support_surface: 2.0, object_top: 1.5, floating: 0.0}
+      # subject_source：主体来源（三种混着产）——scene=直接编辑已有物体；spawn=加外部物体到
+      # 空表面再操作；replace=用外部物体替换已有物体的槽位再操作。同 scale/rotate。
+      subject_source: {scene: 0.5, spawn: 0.25, replace: 0.25}
+    object_add:
+      spawn: true               # 现场取小物体放到表面上（而非复现既有家具）
+      prefer_on_object: true    # 偏向叠在"桌上已有的小物体"上（如笔记本电脑）
+      provider: "objaverse"
+      provider_params:
+        uid_list: "./assets/objaverse_uids.txt"
+        local_cache: "./assets/objaverse"
+        category_map: "./assets/objaverse_categories.json"
+        target_size: 0.30       # 小物件尺度（书/杯/摆件），放台面自然；广角下别太小看不见
+    # subject_source：主体来源三模式混合（scene 直接编辑已有 / spawn 加外部物到空表面 /
+    # replace 用外部物替换已有物槽位），再对该主体做变换。想全直接编辑就设 {scene: 1}。
+    object_scale:
+      scale_range: [0.6, 1.5]
+      subject_source: {scene: 0.5, spawn: 0.25, replace: 0.25}
+    object_rotate:
+      min_degrees: 30
+      max_degrees: 90
+      axes: ["Z"]
+      subject_source: {scene: 0.5, spawn: 0.25, replace: 0.25}
+    object_replace:
+      # same_category_prob: 换成同类的概率。0=全换不同类(含跨域"落地灯→镲片"，故意保留：
+      # OOD/不合常理的编辑对模型是有价值的训练样本)；1=尽量同类("落地灯→台灯"更合理)；
+      # 中间值=按比例混。想要更多合理替换就调高（当前 objaverse 池小，同类命中率有限会回退）。
+      same_category_prob: 0.3
+      provider: "objaverse"
+      provider_params:
+        uid_list: "./assets/objaverse_uids.txt"
+        local_cache: "./assets/objaverse"
+
+instruction:
+  frame: "scene_anchored"
+
+render:
+  backend: "cycles_gpu"
+  resolution: [512, 512]
+  samples: 48
+  pairs_per_scene: 12          # 摊销加载：一间房 load 一次 → 产多对（换家具/机位/算子）
+  global_illumination: "full"
+  # 广角房间视角下主体占画面更小，阈值相应放低（编辑仍要看得见但不必占满）。
+  # 表面感知 add 放的是小物件（书/杯/摆件），占画面本就小 → 阈值取 0.0012（≈315px，仍是清晰变化）。
+  min_pixel_change_ratio: 0.0012
+  min_visible_fraction: 0.04
+  min_subject_area_ratio: 0.0008
+  max_subject_area_ratio: 0.9
+  quality:
+    max_change_ratio: 0.95
+    min_sharpness: 3.0
+    max_background_diff: 6.0

@@ -1,0 +1,91 @@
+# ============================================================
+# 配置驱动整条 pipeline。改这里就能换资产/编辑算子/渲染后端，
+# 不用动代码。每个 name 都对应一个已注册的插件（见 worker/registry.py）。
+# ============================================================
+
+run:
+  num_jobs: 64               # 要生成多少对 (before, after)
+  base_seed: 20260630        # 全局随机种子，保证可复现
+  output_dir: "./out/raw"    # worker 每个 job 的原始输出
+  shard_dir: "./out/shards"  # collector 打包后的 WebDataset 分片
+  shard_size: 1000           # 每个 tar 分片放多少对
+
+ray:
+  address: "auto"            # 单机用 "local"，集群用 "auto"
+  num_cpus_per_job: 2        # 每个渲染 job 占的 CPU
+  num_gpus_per_job: 1        # Cycles GPU 时每 job 占 1 张卡（8×H100 → 最多 8 并发重任务）
+
+# ---- 场景构建器（可插拔，register_scene）----
+scene:
+  name: "tabletop"
+  params:
+    num_distractors: [1, 3]  # 除主体外额外放几个干扰物体（区间内随机）
+    camera_views: 1          # 每个场景渲染几个机位（同一对编辑共享机位）
+
+# ---- 资产来源（可插拔，register_asset）----
+assets:
+  subject:
+    provider: "objaverse"    # 主体物体来源
+    params:
+      uid_list: "./assets/objaverse_uids.txt"   # 预下载好的 uid 列表
+      local_cache: "./assets/objaverse"
+      category_map: "./assets/objaverse_categories.json"  # uid->LVIS 类别（prefetch 产出）→ 真实名词
+  environment:
+    provider: "haven"        # HDRI 环境光照 + 背景
+    params:
+      hdri_dir: "./assets/haven/hdris"
+
+# ---- 编辑算子（可插拔，register_edit）----
+# 起步阶段 6 个物体级算子，按权重随机采样一个施加到主体上。
+edits:
+  sampling_weights:
+    object_move: 1.0
+    object_scale: 1.0
+    object_rotate: 1.0
+    object_replace: 1.0
+    object_add: 1.0
+    object_delete: 1.0
+  params:
+    object_move:
+      # move 的「放置模式」权重（吸附/悬空都是 move 的落点，不单列为编辑类型）
+      placement_weights:
+        support_surface: 3.0   # 放到地面/桌面
+        object_top: 1.0        # 叠到另一物体上
+        ceiling: 0.5           # 贴/挂天花板（需场景有天花板，如 front3d）
+        wall: 0.5              # 贴墙（需完整房间）
+        floating: 0.5          # 故意悬空
+    object_scale:
+      scale_range: [0.5, 1.8]
+    object_rotate:
+      max_degrees: 180
+      axes: ["X", "Y", "Z"]    # 每对只随机选一个轴
+    object_replace:
+      provider: "objaverse"
+      provider_params:
+        uid_list: "./assets/objaverse_uids.txt"
+        local_cache: "./assets/objaverse"
+        category_map: "./assets/objaverse_categories.json"
+
+# ---- 指令措辞（可配置）----
+instruction:
+  frame: "camera_relative"     # camera_relative（左右上下远近）/ scene_anchored（放到桌上/地上）
+  # 注意：多机位时应改用 scene_anchored，否则相机相对方向会矛盾
+
+# ---- 渲染后端（可插拔，register_backend）----
+render:
+  backend: "cycles_gpu"        # 本地调试可改成 "eevee_fast"
+  resolution: [768, 768]
+  samples: 64                  # Cycles 采样数；Eevee 忽略
+  denoiser: "OPTIX"            # OPTIX / OPENIMAGEDENOISE / NONE
+  transparent_bg: false
+  global_illumination: "full"  # full（真实阴影/外溢，推荐）/ off（纯净差异）
+  min_pixel_change_ratio: 0.01 # 变化像素占比低于此值的配对会被丢弃（不可见）
+  # 相机侧质量门槛（编辑算子拒绝采样时用，不合格就重采样）
+  min_visible_fraction: 0.1    # 主体可见比例下限；移动后被完全遮挡会被拒
+  min_subject_area_ratio: 0.005 # 主体屏占比下限；缩小后太小会被拒
+  max_subject_area_ratio: 0.9  # 主体屏占比上限；放大到撑满/出框会被拒
+  # 渲染后质量门槛（QualityFilter，廉价像素度量；阈值对干净数据留足余量）
+  quality:
+    max_change_ratio: 0.85       # 变化铺满全图 → 主体撑爆/整帧闪烁
+    min_sharpness: 3.0           # 拉普拉斯方差过低 → 模糊/欠渲染/近黑
+    max_background_diff: 3.0      # 编辑区外仍大幅变化 → 整体错位/对齐差
