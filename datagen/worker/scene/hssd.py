@@ -79,15 +79,7 @@ class HSSDScene(SceneBuilder):
                 raise RuntimeError(
                     f"HSSD stage {scene_id} 不够封闭(上方遮盖率 {up:.2f}<阈值)——开放/破损，跳过换一间")
 
-        # 场景内容闸（**很松的兜底**）：只毙掉**压倒性非室内**的场景（纯车库/展厅这类真垃圾）。
-        # 正常家庭哪怕车库里有辆车也照常用——真正防错靠下面"主体走 is_indoor"（绝不编辑车/自行车）。
-        # 默认 0.15，即室内家居占比 <15% 才跳过；想更严/更松调 min_indoor_frac，设 0 则不拦。
         from datagen.worker.assets.indoor_categories import is_indoor
-        if editable:
-            indoor_frac = sum(is_indoor(_cp(o, "category")) for o in editable) / len(editable)
-            if indoor_frac < float(p.get("min_indoor_frac", 0.15)):
-                raise RuntimeError(
-                    f"HSSD stage {scene_id} 室内家居占比 {indoor_frac:.2f} 极低（纯车库/展厅类），跳过换一间")
 
         # 3) 选主体 + 其余作干扰物（结构件 stage 不算）。
         # 优先挑「室内家居类 + 有语义类别 + 体量合适」的家具：太小广角下看不清；**太大（墙面级/
