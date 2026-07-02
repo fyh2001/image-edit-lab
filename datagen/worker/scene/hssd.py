@@ -69,13 +69,17 @@ class HSSDScene(SceneBuilder):
         if not editable:
             raise RuntimeError(f"HSSD 场景 {scene_id} 没加载到任何可编辑家具。")
 
+        # 房间几何提前算：既给主体尺寸上限用，也给相机/照明用。
+        geom = _room_geom(stage_objs or editable)
+
         # 3) 选主体 + 其余作干扰物（结构件 stage 不算）。
-        # 优先挑「有语义类别 + 体量够大」的家具：广角房间视角下小物件编辑看不清，
-        # 大件（沙发/床/柜/桌/地毯）删/缩放才明显；同时能拿到真实名词而非 "the object"。
+        # 优先挑「有语义类别 + 体量合适」的家具：太小广角下看不清；**太大（墙面级/结构级built-in，
+        # 如占满一面墙的 shelves）框不进整间房、贴脸像拍墙** → 都排除。大小取"最长边"衡量。
         min_size = float(p.get("min_subject_size", 0.4))
-        sizable = [o for o in editable if _big_enough(o, min_size)]
-        labeled = [o for o in (sizable or editable) if _cp(o, "category") != "object"]
-        pool = labeled or sizable or editable
+        max_frac = float(p.get("max_subject_room_frac", 0.6))   # 主体最长边 > 房间短边×此值 → 太大
+        fit = [o for o in editable if _big_enough(o, min_size) and not _oversized(o, geom, max_frac)]
+        labeled = [o for o in (fit or editable) if _cp(o, "category") != "object"]
+        pool = labeled or fit or editable
         subject = pool[int(rng.integers(0, len(pool)))]
         ctx.register_object(subject, is_subject=True)
         for o in editable:
@@ -87,8 +91,8 @@ class HSSDScene(SceneBuilder):
         # 在建场景时一次性做 → before/after 共享同一材质，不破坏对齐。
         _add_surface_detail((stage_objs or []) + editable, rng, p)
 
-        # 4) 房间几何（用 stage 包围盒）+ 室内灯
-        ctx.extras["scene_geom"] = _room_geom(stage_objs or editable)
+        # 4) 房间几何（上面已算）+ 室内灯
+        ctx.extras["scene_geom"] = geom
         ctx.extras["subject_support"] = "ground"
         ctx.extras["ground"] = stage_objs[0] if stage_objs else None
         _setup_lighting(ctx, ctx.extras["scene_geom"])
@@ -502,6 +506,21 @@ def _has_image_texture(obj) -> bool:
         return False
 
 
+def _oversized(o, geom, max_frac) -> bool:
+    """物体是否**太大**（墙面级/结构级 built-in）→ 框不进整间房、贴脸像拍墙，不宜当主体。
+    判据：最长边 > 房间**短边** × max_frac。拿不到房间尺寸就不拦（返回 False）。"""
+    try:
+        bmin, bmax = geom.get("bounds_min"), geom.get("bounds_max")
+        if not bmin or not bmax:
+            return False
+        room_short = min(float(bmax[0] - bmin[0]), float(bmax[1] - bmin[1]))
+        bb = np.asarray(o.get_bound_box())
+        longest = float((bb.max(axis=0) - bb.min(axis=0)).max())
+        return longest > max_frac * room_short
+    except Exception:
+        return False
+
+
 def _big_enough(o, thr) -> bool:
     """物体最长边是否 ≥ 阈值（挑体量够大的家具当主体，广角下编辑才看得清）。"""
     try:
@@ -587,28 +606,51 @@ def set_wide_fov(resolution, fov_rad=1.30):
         print(f"[hssd] 设广角跳过: {e}")
 
 
+def _bbox_radius(obj):
+    """主体包围盒的"半对角"（半径）——衡量它在画面里占多大。"""
+    try:
+        bb = np.asarray(obj.get_bound_box())
+        return 0.5 * float(np.linalg.norm(bb.max(axis=0) - bb.min(axis=0)))
+    except Exception:
+        return 0.5
+
+
+def _cam_fov():
+    """当前相机水平视场角（rad）；取不到就用广角默认。"""
+    try:
+        import bpy
+        return float(bpy.context.scene.camera.data.angle)
+    except Exception:
+        return 1.30
+
+
 def _sample_camera(rng, subject, geom):
-    """站在房间**边缘**、离主体一段距离、广角朝主体拍 → 画面里是"房间 + 其中的主体"，
-    而不是贴脸特写。要求主体在视锥内；配合 set_wide_fov 的广角能带出整间房。"""
+    """在**主体周围**的环上站位、广角朝主体拍 → 画面里是"主体所在的那块房间"。
+
+    绕**主体**布点（而非房间全局中心）：HSSD 常是多房间 stage，全局中心可能落在墙/隔断/别的房间里，
+    绕中心布相机会站到奇怪位置、对着墙拍。绕主体布点则相机永远在主体实际所在区域。
+    距离按主体大小自适应（大件站更远，别糊满屏），要求主体在视锥内且未被挡。"""
     subj = np.asarray(subject.get_location(), dtype=float)
     bmin = np.asarray(geom.get("bounds_min") or [-3, -3, 0], dtype=float)
     bmax = np.asarray(geom.get("bounds_max") or [3, 3, 3], dtype=float)
-    center = (bmin + bmax) / 2.0
     ground = float(geom.get("ground_z", bmin[2]))
     H = float(bmax[2] - bmin[2])
-    # 站在房间**内部**（离墙留距，别贴墙/穿墙），半径取半宽的一部分随机
-    half_x = (bmax[0] - bmin[0]) / 2
-    half_y = (bmax[1] - bmin[1]) / 2
+    # 主体越大，相机要站越远，否则主体糊满整屏、看着像贴脸拍墙。按"主体最多占画面 max_fill"反推最小距离：
+    # 主体角直径 = 2·atan(radius/dist) 应 ≤ max_fill·FOV → dist ≥ radius / tan(0.5·max_fill·FOV)。
+    subj_radius = _bbox_radius(subject)
+    fov = _cam_fov()
+    max_fill = 0.6
+    min_dist = max(1.6, subj_radius / max(0.1, np.tan(0.5 * max_fill * fov)))
     fallback = None
-    for _ in range(60):
+    for _ in range(80):
         ang = rng.uniform(0, 2 * np.pi)
-        fx = rng.uniform(0.25, 0.6)                            # 0=房间中心, 0.6=靠近墙但仍在内
-        cam = np.array([center[0] + np.cos(ang) * fx * half_x,
-                        center[1] + np.sin(ang) * fx * half_y,
+        dist = rng.uniform(min_dist, min_dist + 2.5)          # 绕主体的环上取距离
+        cam = np.array([subj[0] + np.cos(ang) * dist,
+                        subj[1] + np.sin(ang) * dist,
                         ground + rng.uniform(1.3, min(1.8, max(1.4, H - 0.4)))])
         cam[0] = float(np.clip(cam[0], bmin[0] + 0.6, bmax[0] - 0.6))
         cam[1] = float(np.clip(cam[1], bmin[1] + 0.6, bmax[1] - 0.6))
-        if float(np.linalg.norm(cam[:2] - subj[:2])) < 1.5:   # 太近→贴脸，要距离带出房间
+        if float(np.linalg.norm(cam[:2] - subj[:2])) < min_dist:  # 太近→主体占满/贴脸，要距离带出房间
             continue
         look = subj.copy()
         look[2] = ground + 0.4
