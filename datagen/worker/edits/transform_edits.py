@@ -9,6 +9,7 @@ import numpy as np
 from datagen.worker.edits.base import EditOperator, EditInvalid
 from datagen.worker.edits._common import noun, camera_basis, transform_dict
 from datagen.worker.edits import _reference
+from datagen.worker.edits import _carried
 from datagen.worker.physics import validity, placement
 from datagen.worker.geometry import frames
 from datagen.worker.registry import register_edit
@@ -118,6 +119,8 @@ class MoveEdit(EditOperator):
         if ref is None:
             raise EditInvalid("object_move: 主体与画面里同类物体无法区分（歧义），丢弃")
         loc0 = np.array(obj.get_location(), dtype=float)
+        # 变换前快照"放在主体顶面上的物体"，稍后让它们随主体一起挪（否则桌上物留原地→悬空）
+        carried = _carried.snapshot(_carried.resting_on(obj, ctx.all_objects))
         bmin, bmax = _bounds(ctx)
         baseline = validity.contacts(obj, ctx.all_objects)   # 原场景就接触的邻居，挪走后忽略
 
@@ -171,6 +174,7 @@ class MoveEdit(EditOperator):
         mode, tgt = chosen["mode"], chosen["tgt"]
         loc1 = np.array(obj.get_location(), dtype=float)
         delta = loc1 - loc0
+        _carried.follow_translate(carried, delta)        # 桌上物随主体平移，继续压在顶面
         right, up, fwd = camera_basis(0)
         dirinfo = frames.classify_translation(delta, right, up, fwd)
 
@@ -220,6 +224,9 @@ class ScaleEdit(EditOperator):
         cur = np.array(obj.get_scale(), dtype=float)
         bbox0 = np.asarray(obj.get_bound_box())
         bottom_z = float(bbox0.min(axis=0)[2])
+        top_z0 = float(bbox0.max(axis=0)[2])
+        # 变换前快照顶面上的物体，缩放后让它们落到新顶面（否则缩小床头柜→台灯悬空）
+        carried = _carried.snapshot(_carried.resting_on(obj, ctx.all_objects))
         baseline = validity.contacts(obj, ctx.all_objects)   # 原场景就接触的邻居，编辑后忽略
 
         chosen = {}
@@ -271,6 +278,9 @@ class ScaleEdit(EditOperator):
         if not ok:
             raise EditInvalid("object_scale: 缩放后碰撞/越界/太小/太大")
 
+        # 承载物落到新顶面（缩小→顶面降 dz，放大→抬升；水平不动）
+        _carried.follow_drop(carried, top_z0 - float(np.asarray(obj.get_bound_box()).max(axis=0)[2]))
+
         f = chosen["f"]
         n = noun(obj)
         bigger = f >= 1.0
@@ -308,7 +318,11 @@ class RotateEdit(EditOperator):
         bmin, bmax = _bounds(ctx)
         qcfg, res = _quality(ctx)
         rot0 = np.array(obj.get_rotation_euler(), dtype=float)
+        bb0 = np.asarray(obj.get_bound_box())
+        center_xy = ((bb0.max(axis=0) + bb0.min(axis=0)) / 2.0)[:2]
         baseline = validity.contacts(obj, ctx.all_objects)   # 原场景就接触的邻居，旋转后忽略
+        # 变换前快照顶面上的物体，绕竖轴旋转后让它们一起转（否则转桌子→桌上物不动、错位）
+        carried = _carried.snapshot(_carried.resting_on(obj, ctx.all_objects))
         chosen = {}
 
         min_deg = float(self.params.get("min_degrees", 15))
@@ -348,6 +362,8 @@ class RotateEdit(EditOperator):
             raise EditInvalid("object_rotate: 旋转后碰撞/越界/不可见")
 
         axis, ang = chosen["axis"], chosen["ang"]
+        if axis == "Z":                          # 绕竖轴：承载物一起转（X/Y 翻倒不好跟随，略过）
+            _carried.follow_rotate_z(carried, center_xy, ang)
         n = noun(obj)
         instr = self.phrase([f"rotate the {ref}", f"turn the {ref} around"], rng)
         reseated = axis in ("X", "Y")

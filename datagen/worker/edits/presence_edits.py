@@ -92,6 +92,10 @@ class ReplaceEdit(EditOperator):
     def apply(self, ctx):
         old = ctx.subject
         old_n = noun(old)
+        # 扁平地面覆盖物（地毯/地垫/走道毯）不适合当替换主体：又大又扁，按尺寸匹配会把紧凑新物
+        # 放大成穿模巨物（"地毯→2m 陶器"）；而且"把地毯换成陶器"本身也别扭。跳过。
+        if old_n and any(k in old_n.lower() for k in ("carpet", "rug", " mat", "mat ", "runner", "carpeting")):
+            raise EditInvalid("object_replace: 扁平地面覆盖物不适合替换，丢弃")
         old_ref = _reference.subject_phrase(ctx, old)   # 消歧要在 hide 旧物前算
         if old_ref is None:
             raise EditInvalid("object_replace: 旧物与画面里同类物体无法区分（歧义），丢弃")
@@ -190,14 +194,18 @@ def _sample_replacement(provider, ctx, old_n, old_uid, same_cat, tries=10):
     return provider.sample_object(ctx)                # 兜底（极端情况下都被弃）
 
 
-def _match_size(ref, obj):
-    """把 obj 缩放到「最长边与 ref 相同」，使替换前后占地可比（§3.6）。"""
+def _match_size(ref, obj, max_long=1.5):
+    """把 obj 缩放到「最长边与 ref 相同」，使替换前后占地可比（§3.6）。
+
+    加上限 max_long：即便旧物很大/很扁，也别把紧凑新物放大成穿模巨物（安全兜底，米）。
+    """
     import numpy as np
     rb = np.asarray(ref.get_bound_box())
     ob = np.asarray(obj.get_bound_box())
     ref_long = float((rb.max(axis=0) - rb.min(axis=0)).max())
     obj_long = float((ob.max(axis=0) - ob.min(axis=0)).max()) or 1e-6
-    r = ref_long / obj_long
+    target = min(ref_long, float(max_long))
+    r = target / obj_long
     cur = np.array(obj.get_scale(), dtype=float)
     obj.set_scale((cur * r).tolist())
 
