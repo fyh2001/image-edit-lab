@@ -1,0 +1,21 @@
+# 本机验证版本（2026-07 M5 Pro）注在各行末，服务器上不低于这些即可。
+
+# --- Orchestrator side (normal Python env, runs Ray) ---
+ray[default]>=2.9            # 通用流式执行器 / 分布式（本机验 2.56.0）
+numpy>=1.24                  # (本机 2.5.0)
+pyyaml>=6.0                  # (6.0.3)
+imageio>=2.31               # 读写 before/after png（collector/export/scripts；本机 2.37.3）
+certifi>=2024.2            # SSL 证书（下载 objaverse/hssd/hdri 前设 SSL_CERT_FILE；本机 2026.6.17）
+webdataset>=0.2.86         # WebDataset tar 分片打包（1.0.2）
+objaverse>=0.1.7           # 下载 Objaverse 资产
+sqlalchemy>=2.0            # 元数据/账本入库（orchestrator/db.py, ingest.py；2.0.51）
+psycopg[binary]>=3.1       # PostgreSQL 驱动（sqlite 无需额外驱动；3.3.4）
+datasets>=3.0              # HF 原生 Parquet 导出（Image 特征 + Dataset Viewer；本机验 5.0.0）
+huggingface_hub[cli]>=1.0  # HF 上传（≥1.0 命令改叫 `hf`，见文档；本机 1.21.0）
+tqdm>=4.66
+
+# --- Worker side (Blender 自带 Python，通过 `blenderproc pip install` 装) ---
+# blenderproc 用 `pip install blenderproc` 装在 orchestrator 环境，管理内置 Blender。
+# worker 脚本由 `blenderproc run` 启动、跑在 Blender 的 Python 里；worker 侧按需
+# `blenderproc pip install <pkg>`（numpy 自带，另需 imageio pyyaml）。
+blenderproc>=2.7.0          # (本机 2.8.0 + Blender 4.2.1)

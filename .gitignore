@@ -1,0 +1,29 @@
+# 密钥 —— 绝不提交
+.env
+*.token
+
+# 大资产（几 G glb/贴图/HDRI，服务器上重新 prefetch）
+assets/objaverse/
+assets/hssd/
+assets/haven/
+
+# 产物 / 分片 / Parquet
+out/
+
+# 平台相关二进制（ktx CLI 等，按平台重下）
+tools/
+
+# 虚拟环境 / 缓存
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# 系统
+.DS_Store
+
+# 日志 / scratch
+*.log
+scratchpad*
