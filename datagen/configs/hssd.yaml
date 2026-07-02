@@ -19,11 +19,16 @@ ray:                          # 通用流式执行器（orchestrator/ray_runner.
     hssd:    {num_cpus: 4, num_gpus: 1}   # 大房间加载重，多给 CPU（profile_by=scene→按场景名）
     pack:    {num_cpus: 2, num_gpus: 0}   # 打包/上传是 CPU 活，不占卡
     upload:  {num_cpus: 1, num_gpus: 0}
+    caption: {num_cpus: 2, num_gpus: 0}   # stub 打标不占卡；接真 VLM 时改 num_gpus: 1
 
 # 后处理算子链：render 全跑完后依次执行（reduce/sink，对整批产物操作一次）
 pipeline:
-  - {type: pack_parquet, profile: pack}          # 原始产物 → HF Parquet（带 Image 特征 + split）
-  # 想自动上传就取消注释（需 hf auth login；parquet_dir 由上一步自动喂入）：
+  # ① 打标：把模板指令改写成自然、语义化的一条 caption（每对一条 + 风格均衡，写回 sample.json）。
+  #    provider=stub 无网络先跑通；接 Qwen-VL 时换 provider: qwen_vl + use_images: true（并给 caption 档配 GPU）。
+  - {type: vlm_caption, profile: caption, params: {provider: stub, seed: 0}}
+  # ② 打包：产物（优先用 caption）→ HF Parquet（带 Image 特征 + split）。
+  - {type: pack_parquet, profile: pack}
+  # ③ 想自动上传就取消注释（需 hf auth login；parquet_dir 由上一步自动喂入）：
   # - {type: upload_hf, profile: upload, params: {repo_id: fyh2001/obj-edits-hssd-v1, private: false}}
 
 scene:

@@ -56,7 +56,8 @@ def main():
         tasks = itertools.islice(tasks, args.limit)
 
     modules = ["datagen.orchestrator.tasks.blender_render",
-               "datagen.orchestrator.tasks.postprocess"]
+               "datagen.orchestrator.tasks.postprocess",
+               "labeling.caption.task"]                 # vlm_caption 算子（pipeline 里可选串）
 
     # —— render 阶段（扇出，流式或任务级）——
     if ray_cfg.get("streaming"):                          # 增量流式：边产边消费每一对

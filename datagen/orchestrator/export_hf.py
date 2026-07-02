@@ -43,13 +43,15 @@ def build_rows(raw_dir, holdout_scenes=None):
         prov = rec.get("provenance") or {}
         src = prov.get("scene_source") or {}
         scene_id = src.get("scene_id")
-        instr = rec.get("instruction") or ""
+        # 优先用 captioner 产的自然指令（caption），没打标就退回基线模板指令。
+        instr = rec.get("caption") or rec.get("instruction") or ""
         split = "validation" if str(scene_id) in holdout else "train"
         by_split[split].append({
             "key": key,
             "source_image": before,                 # 路径 → Image() 载入
             "target_image": after,
             "edit_instruction": instr,
+            "caption_style": rec.get("caption_style"),
             "edit_op": edit.get("op"),
             "scene_id": scene_id,
             "source_dataset": src.get("dataset"),
@@ -77,6 +79,7 @@ def _features():
         "source_image": Image(),                    # HF Viewer 会渲染缩略图
         "target_image": Image(),
         "edit_instruction": Value("string"),
+        "caption_style": Value("string"),
         "edit_op": Value("string"),
         "scene_id": Value("string"),
         "source_dataset": Value("string"),
