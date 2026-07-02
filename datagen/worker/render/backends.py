@@ -14,6 +14,46 @@ from datagen.worker.render.base import RenderBackend
 from datagen.worker.registry import register_backend
 
 
+def _setup_cycles_quality(scene, render_cfg: Dict[str, Any]):
+    """Cycles 真实感/降噪配置（安全、不破坏 before/after 对齐）。全部可 config 覆盖：
+
+      light_paths: {max, diffuse, glossy, transmission, volume}  —— 反弹数（室内 diffuse 6 更亮更真）
+      noise_threshold / min_samples                              —— 自适应采样（够干净就停，省时）
+      clamp_indirect / clamp_direct                              —— 钳制亮样本，灭 fireflies 噪点
+      caustics: false                                            —— 关焦散（主要噪声源）
+    这些是渲染器全局设置，before/after 两帧一致 → 不影响"只有主体变"的对齐。
+    """
+    cy = scene.cycles
+    lp = render_cfg.get("light_paths") or {}
+    try:
+        cy.max_bounces = int(lp.get("max", 12))
+        cy.diffuse_bounces = int(lp.get("diffuse", 6))        # 室内多给一档，暗角更亮更真
+        cy.glossy_bounces = int(lp.get("glossy", 4))
+        cy.transmission_bounces = int(lp.get("transmission", 12))
+        cy.volume_bounces = int(lp.get("volume", 0))
+    except Exception as e:
+        print(f"[cycles] 反弹设置跳过: {e}")
+    try:
+        nt = render_cfg.get("noise_threshold")
+        if nt is not None:
+            cy.use_adaptive_sampling = True
+            cy.adaptive_threshold = float(nt)                 # 如 0.01
+            cy.adaptive_min_samples = int(render_cfg.get("min_samples", 0))
+    except Exception as e:
+        print(f"[cycles] 自适应采样跳过: {e}")
+    try:
+        cy.sample_clamp_indirect = float(render_cfg.get("clamp_indirect", 10.0))  # 灭 fireflies
+        cy.sample_clamp_direct = float(render_cfg.get("clamp_direct", 0.0))       # 0=不钳直接光
+    except Exception as e:
+        print(f"[cycles] 钳制设置跳过: {e}")
+    try:
+        if not bool(render_cfg.get("caustics", False)):
+            cy.caustics_reflective = False
+            cy.caustics_refractive = False
+    except Exception:
+        pass
+
+
 def _set_color_management(render_cfg: Dict[str, Any]):
     """色彩管理：默认 AgX（Blender 4.x）——高光像真相机一样滚降，"少 CG 多照片"。
 
@@ -99,6 +139,8 @@ class CyclesGPUBackend(RenderBackend):
                 scene.cycles.glossy_bounces = 0
             except Exception:
                 pass
+        else:
+            _setup_cycles_quality(scene, render_cfg)
         _common_setup(render_cfg)
 
     def render(self):

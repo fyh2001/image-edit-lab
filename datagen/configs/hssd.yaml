@@ -121,6 +121,10 @@ render:
   global_illumination: "full"
   view_transform: "AgX"        # 色彩管理：高光滚降，少 CG 多照片（Standard 会死白发假）
   dof: {fstop: 3.5}            # 景深：聚焦主体、虚化远背景（真实感）。删掉本行即关景深。
+  # Cycles 真实感/降噪（安全，不破坏对齐）：
+  noise_threshold: 0.01        # 自适应采样：够干净就停，省时
+  clamp_indirect: 10.0         # 钳制间接亮样本，灭 fireflies 噪点
+  light_paths: {max: 12, diffuse: 6, glossy: 4, transmission: 12}  # 室内 diffuse 6 更亮更真
   # 广角房间视角下主体占画面更小，阈值相应放低（编辑仍要看得见但不必占满）。
   # 表面感知 add 放的是小物件（书/杯/摆件），占画面本就小 → 阈值取 0.0012（≈315px，仍是清晰变化）。
   min_pixel_change_ratio: 0.0012

@@ -432,6 +432,11 @@ def _add_sun_and_fill(geom, rng):
         sun.set_rotation_euler([float(rng.uniform(0.3, 0.7)),
                                 float(rng.uniform(0.1, 0.4)),
                                 float(rng.uniform(0.0, 6.283))])
+        # 软阴影：太阳角直径调大（默认 0.526°=硬边），~2° 更像真实柔和阴影，随机一点增多样性
+        try:
+            sun.blender_obj.data.angle = np.radians(float(rng.uniform(1.5, 3.0)))
+        except Exception:
+            pass
         # 极弱面光兜底（比原来暗一个量级，只抬死黑不抹平方向感）
         sx, sy = float(bmax[0] - bmin[0]), float(bmax[1] - bmin[1])
         nx, ny = max(1, int(round(sx / 4.0))), max(1, int(round(sy / 4.0)))
