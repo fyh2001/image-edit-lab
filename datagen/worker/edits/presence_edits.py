@@ -129,6 +129,21 @@ class ReplaceEdit(EditOperator):
                              ignore=baseline):
             raise EditInvalid("object_replace: 新物体落稳后仍与场景碰撞")
 
+        # 关键：新物体自己必须在画面里**可见且够大**。否则"移走旧物"是大变化、能过 change_is_visible，
+        # 但新物没露脸 → 这条样本实际是"旧物→(空)"，却标成"换成 Y"，是错标（碰到过 地毯→太阳能板）。
+        r = ctx.spec.render
+        res = list(r.get("resolution", [768, 768]))
+        # 替换物要求比一般主体更"看得见"：至少占画面一定比例（默认 1%，可 config 调）。
+        min_new_area = float(self.params.get(
+            "min_new_visible_area", max(0.01, float(r.get("min_subject_area_ratio", 0.005)))))
+        vis_ok, why = validity.camera_quality_ok(
+            new_obj, res,
+            min_visible=float(r.get("min_visible_fraction", 0.1)),
+            min_area=min_new_area,
+            max_area=float(r.get("max_subject_area_ratio", 0.9)))
+        if not vis_ok:
+            raise EditInvalid(f"object_replace: 新物体在画面里不可见/太小（{why}），丢弃避免错标")
+
         ctx.subject = new_obj
         new_n = noun(new_obj)
         meta = {
