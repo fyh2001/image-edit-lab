@@ -16,11 +16,12 @@ import json
 import random
 
 
-def sample_diverse_uids(lvis, n, exclude=None, seed=0):
+def sample_diverse_uids(lvis, n, exclude=None, seed=0, indoor_only=True):
     """跨类别均匀采样 n 个 uid（纯函数，可单测，不依赖 objaverse）。
 
     旧实现按 LVIS 字典顺序取前 N → 全挤在头几个类别。这里改成：打乱类别顺序后
     round-robin，每轮从每个类别各取一个，保证类别多样性。固定 seed 可复现。
+    indoor_only=True 时只从**室内家居**类别采（不下载动物/车辆/户外，从源头保证场景协调）。
 
     Args:
         lvis: {category: [uid, ...]}
@@ -32,6 +33,11 @@ def sample_diverse_uids(lvis, n, exclude=None, seed=0):
     exclude = exclude or set()
     rng = random.Random(seed)
     cats = list(lvis.keys())
+    if indoor_only:
+        from datagen.worker.assets.indoor_categories import is_indoor
+        indoor = [c for c in cats if is_indoor(c)]
+        if indoor:
+            cats = indoor                              # 只采室内类；万一都不匹配则保留全部
     rng.shuffle(cats)
     iters = {c: iter(rng.sample(lvis[c], len(lvis[c]))) for c in cats}
     uid2cat, uids = {}, []

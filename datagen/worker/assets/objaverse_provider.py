@@ -25,7 +25,7 @@ class ObjaverseProvider(AssetProvider):
                  category_map: str = "./assets/objaverse_categories.json",
                  meta_map: str = "./assets/objaverse_meta.json",
                  target_size: float = 1.0, category_sizes=None,
-                 clean_noun: bool = False, **kw):
+                 clean_noun: bool = False, indoor_only: bool = True, **kw):
         """
         target_size: 统一目标尺寸（最长边，米）。tabletop 用它把各资产归一到相近大小，取景稳定。
         category_sizes: 按类别归一到真实尺度（room 级场景用）。
@@ -38,6 +38,18 @@ class ObjaverseProvider(AssetProvider):
         self.uids = self._load_uids(uid_list)
         # uid -> 真实类别（LVIS）。文件缺失时为空，noun 自动回退 "object"。
         self.category_map = load_category_map(category_map)
+        # 只保留**室内家居**类别的物体（防"熊猫/驴/车"进房间）。过滤后为空则回退全池（避免卡死）。
+        if indoor_only and self.category_map:
+            from datagen.worker.assets.indoor_categories import is_indoor
+            kept = [u for u in self.uids if is_indoor(self.category_map.get(u))]
+            if kept:
+                dropped = len(self.uids) - len(kept)
+                if dropped:
+                    print(f"[objaverse] 室内白名单：保留 {len(kept)}/{len(self.uids)} 个物体"
+                          f"（滤掉 {dropped} 个非室内类：动物/车辆/户外等）")
+                self.uids = kept
+            else:
+                print("[objaverse] 警告：室内白名单过滤后为空，回退全池（检查类别是否匹配白名单）")
         # uid -> 富标注（name/tags/license），供 metadata 的物体描述。缺失则无描述。
         self.meta_map = load_meta_map(meta_map)
         self.target_size = float(target_size)
