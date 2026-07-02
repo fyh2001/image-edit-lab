@@ -93,9 +93,11 @@ class HSSDScene(SceneBuilder):
         geom = ctx.extras["scene_geom"]
         set_wide_fov(ctx.spec.render.get("resolution", [512, 512]),
                      fov_rad=float(p.get("fov_rad", 1.30)))
+        dof_cfg = ctx.spec.render.get("dof")             # 景深（可选，聚焦主体，真实感）
         n_views = int(p.get("camera_views", 1))
         for _ in range(n_views):
             bproc.camera.add_camera_pose(_sample_camera(rng, subject, geom))
+            _apply_dof(subject, dof_cfg)
 
         # 摊销加载：候选主体 + 重新取景（run_job 一次房间产多对，每对换家具 + 重新框相机）
         ctx.extras["editable_subjects"] = list(pool)
@@ -106,6 +108,7 @@ class HSSDScene(SceneBuilder):
             except Exception:
                 pass
             bproc.camera.add_camera_pose(_sample_camera(rng, subj, geom))
+            _apply_dof(subj, dof_cfg)                     # 焦点跟随本对主体
         ctx.extras["reframe_camera"] = _reframe
 
         def _closeup(target):
@@ -115,10 +118,31 @@ class HSSDScene(SceneBuilder):
             except Exception:
                 pass
             bproc.camera.add_camera_pose(_closeup_camera(rng, target, geom))
+            _apply_dof(target, dof_cfg)
         ctx.extras["closeup_camera"] = _closeup
 
 
 # ----------------------- 工具 -----------------------
+
+def _apply_dof(target, dof_cfg):
+    """给当前相机开景深，焦点=主体（focus_object 让 Blender 自动算焦距，随重取景更新）。
+
+    dof_cfg: {fstop: 光圈值(越小越虚), ...} 或 None(不开)。相机在 before/after 不变 →
+    背景被同样虚化，不破坏"只有主体变"的像素对齐。fstop 别太小，否则编辑区/近处也糊。
+    """
+    if not dof_cfg:
+        return
+    try:
+        import bpy
+        cam = bpy.context.scene.camera
+        if cam is None:
+            return
+        cam.data.dof.use_dof = True
+        cam.data.dof.aperture_fstop = float(dof_cfg.get("fstop", 4.0))
+        cam.data.dof.focus_object = target.blender_obj
+    except Exception as e:
+        print(f"[hssd] 景深跳过: {e}")
+
 
 def _load_semantics(csv_path):
     """读 HSSD semantics/objects.csv → {object_id: {category, noun, description}}。

@@ -15,8 +15,11 @@ from datagen.worker.registry import register_asset
 
 @register_asset("haven")
 class HavenEnvironmentProvider(EnvironmentProvider):
-    def __init__(self, hdri_dir: str = "./assets/haven/hdris", **kw):
+    def __init__(self, hdri_dir: str = "./assets/haven/hdris", strength: float = 1.0,
+                 strength_jitter: float = 0.0, **kw):
         super().__init__(**kw)
+        self.strength = float(strength)                 # enclosed 房间可调 >1 提亮
+        self.strength_jitter = float(strength_jitter)   # 每场景强度抖动 → 明暗多样性
         self.hdris = sorted(
             glob.glob(os.path.join(hdri_dir, "**", "*.hdr"), recursive=True)
             + glob.glob(os.path.join(hdri_dir, "**", "*.exr"), recursive=True)
@@ -32,11 +35,16 @@ class HavenEnvironmentProvider(EnvironmentProvider):
         hdri = str(ctx.rng.choice(self.hdris))
         # 随机旋转环境，增加光照方向多样性（域随机化）
         rot_z = float(ctx.rng.uniform(0, 6.283))
+        strength = self.strength
+        if self.strength_jitter > 0:
+            strength *= float(ctx.rng.uniform(1.0 - self.strength_jitter, 1.0 + self.strength_jitter))
         try:
-            bproc.world.set_world_background_hdr_img(hdri, rotation_euler=[0, 0, rot_z])
+            bproc.world.set_world_background_hdr_img(
+                hdri, strength=strength, rotation_euler=[0, 0, rot_z])
         except TypeError:
             bproc.world.set_world_background_hdr_img(hdri)
         ctx.extras["hdri"] = os.path.basename(hdri)
+        ctx.extras["hdri_strength"] = round(strength, 3)
 
 
 def _flat_world(strength=2.5):

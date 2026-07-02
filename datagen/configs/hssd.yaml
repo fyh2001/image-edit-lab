@@ -48,6 +48,8 @@ assets:
     provider: "haven"
     params:
       hdri_dir: "./assets/haven/hdris"
+      strength: 1.3            # enclosed 房间提亮（HDRI 光被墙挡，>1 保证主体够亮过质量门槛）
+      strength_jitter: 0.25    # 每场景强度 ±25% 抖动 → 明暗多样性（域随机化）
   subject:
     provider: "objaverse"
     params:
@@ -114,9 +116,11 @@ instruction:
 render:
   backend: "cycles_gpu"
   resolution: [512, 512]
-  samples: 48
+  samples: 128                 # 高一点去噪后不塑料（H100 上很便宜）；OPTIX 降噪兜底
   pairs_per_scene: 12          # 摊销加载：一间房 load 一次 → 产多对（换家具/机位/算子）
   global_illumination: "full"
+  view_transform: "AgX"        # 色彩管理：高光滚降，少 CG 多照片（Standard 会死白发假）
+  dof: {fstop: 3.5}            # 景深：聚焦主体、虚化远背景（真实感）。删掉本行即关景深。
   # 广角房间视角下主体占画面更小，阈值相应放低（编辑仍要看得见但不必占满）。
   # 表面感知 add 放的是小物件（书/杯/摆件），占画面本就小 → 阈值取 0.0012（≈315px，仍是清晰变化）。
   min_pixel_change_ratio: 0.0012

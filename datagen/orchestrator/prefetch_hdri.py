@@ -27,10 +27,11 @@ def _ssl_ctx():
 
 _CTX = _ssl_ctx()
 
-# 精选：读起来像真实室内房间的 HDRI（避免纯影棚/教堂/仓库那种极端场景）。
+# 精选：真·住宅/生活空间内景，光照相对均匀（避开影棚/废墟/工业/教堂/仓库那种极端场景，
+# 它们会给 HSSD 房间打上奇怪的方向光或过暗）。全 CC0，可商用。
 CURATED = [
-    "cayley_interior", "combination_room", "aft_lounge", "anniversary_lounge",
-    "art_studio", "church_meeting_room", "brown_photostudio_02", "small_hangar_01",
+    "cayley_interior", "combination_room", "en_suite", "comfy_cafe",
+    "cabin", "country_club", "anniversary_lounge", "aft_lounge",
 ]
 API = "https://api.polyhaven.com/files/"
 
