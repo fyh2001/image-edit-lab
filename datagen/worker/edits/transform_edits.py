@@ -39,6 +39,21 @@ def _quality(ctx):
     }, list(r.get("resolution", [768, 768]))
 
 
+def _rotate_view_change(axis, degrees):
+    """把旋转翻译成"对镜头露出哪一面"的客观事实，供 caption 生成视角类指令。
+
+    绕竖轴(Z=yaw)：|deg|≈180 → 露出相反的一面（背对/正对切换）；≈90 → 露出侧面；否则转了一角度。
+    绕 X/Y(tip/tilt)：物体被"放倒/翻转"，不是转身。front/back/side 名称交给看图的 VLM。
+    """
+    d = abs(float(degrees)) % 360.0
+    d = min(d, 360.0 - d)                         # 折到 [0,180]
+    if axis == "Z":
+        kind = "opposite_side" if d >= 135 else "side_face" if d >= 45 else "partial_turn"
+        return {"kind": kind, "about": "vertical", "yaw_degrees": round(d, 1),
+                "relative_to": "camera"}          # 竖轴转 → 换对镜头的面
+    return {"kind": "tipped", "about": "horizontal", "degrees": round(d, 1)}
+
+
 def _maybe_spawn_subject(op, ctx):
     """按 `subject_source` 权重选主体来源，再让算子对它变换。三种模式混着产：
       - scene   ：直接编辑场景**已有物体**（真实分布，默认）
@@ -297,13 +312,17 @@ class RotateEdit(EditOperator):
         n = noun(obj)
         instr = self.phrase([f"rotate the {ref}", f"turn the {ref} around"], rng)
         reseated = axis in ("X", "Y")
+        deg = round(math.degrees(ang), 2)
         meta = {
             "op": "object_rotate", "noun": n,
             "axis": axis, "axis_world_vector": self.AXES[axis],
-            "degrees": round(math.degrees(ang), 2),
+            "degrees": deg,
             "rotation_space": "world", "euler_order": "XYZ",
             "delta_quat": [round(x, 6) for x in
                            frames.axis_angle_to_quat(self.AXES[axis], ang)],
+            # 相机相对视角变化（纯几何，正确）：绕竖轴(Z)转 → 换成对镜头的另一面；
+            # front/back/side 的语义命名交给看图的 VLM captioner，这里只给客观事实。
+            "view_change": _rotate_view_change(axis, deg),
             "reseated": reseated,
             "final_transform": transform_dict(obj),
             "validity": {"strategy": "analytic", "num_attempts": attempts,
