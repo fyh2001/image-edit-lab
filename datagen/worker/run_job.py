@@ -336,12 +336,16 @@ def _produce_pair(ctx, spec, backend, editor, job_id, op_name=None, seen=None):
     # delete 后主体已隐藏，几何检查无意义；其余算子对最终主体做穿地/悬空检查。
     if ctx.subject is not None and meta.get("op") != "object_delete":
         gz = float(ctx.extras.get("scene_geom", {}).get("ground_z", 0.0))
-        # 穿地：最低点低于地面多少（不管贴地还是在桌上都对；接触≈0 不误判）→ 超阈值直接丢
-        pen = validity.floor_penetration(ctx.subject, gz)
-        v["penetration_depth"] = round(pen, 4)
         max_pen = float((spec.render.get("quality") or {}).get("max_penetration", 0.02))
+        # 穿地：最低点低于地面多少（不管贴地还是在桌上都对；接触≈0 不误判）
+        pen_floor = validity.floor_penetration(ctx.subject, gz)
+        # 穿支撑/邻物：主体陷进某物体体内多深（casserole 盖住台灯座那类）
+        pen_obj = validity.support_penetration(ctx.subject, ctx.all_objects)
+        pen = max(pen_floor, pen_obj)
+        v["penetration_depth"] = round(pen, 4)
         if pen > max_pen:
-            print(f"[run_job] DISCARD(穿模地面 {pen:.3f}m>{max_pen}) {job_id}")
+            where = "地面" if pen_floor >= pen_obj else "支撑物"
+            print(f"[run_job] DISCARD(穿模{where} {pen:.3f}m>{max_pen}) {job_id}")
             return False
         # 悬空：优先用射线到真实支撑面的间隙；射线失败退回"最低点距地面"（仅当支撑是地面时才准）
         gap = None

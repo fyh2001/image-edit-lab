@@ -135,6 +135,39 @@ def floor_penetration(obj, floor_z: float) -> float:
         return 0.0
 
 
+def support_penetration(obj, others, tol: float = 0.02) -> float:
+    """物体插进**某个支撑/邻近物体**里多深（米）。0 = 没插进。
+
+    判据（用包围盒，粗但够抓明显穿模、不会把"架在顶面上"误判）：主体水平中心落在某物体
+    footprint 内，且主体**最低点落在该物体的顶和底之间、并低于其顶面 tol 以上** → 说明主体
+    没有稳稳架在它顶面，而是**陷进了它的体内**。取最深的一处。
+    - 正常架在桌面：主体底≈桌面顶 → 不低于顶面 tol → 0。
+    - 陷进桌体/柜体（casserole 盖住台灯座那类）：主体底在物体中部 → 返回 顶−底 的深度。
+    """
+    try:
+        ob = np.asarray(obj.get_bound_box())
+    except Exception:
+        return 0.0
+    ob_bottom = float(ob.min(axis=0)[2])
+    cx = 0.5 * float(ob.min(axis=0)[0] + ob.max(axis=0)[0])
+    cy = 0.5 * float(ob.min(axis=0)[1] + ob.max(axis=0)[1])
+    worst = 0.0
+    for o in others:
+        if o is obj:
+            continue
+        try:
+            sb = np.asarray(o.get_bound_box())
+        except Exception:
+            continue
+        s_lo, s_hi = sb.min(axis=0), sb.max(axis=0)
+        if not (s_lo[0] <= cx <= s_hi[0] and s_lo[1] <= cy <= s_hi[1]):   # 水平不覆盖主体中心
+            continue
+        s_top, s_bottom = float(s_hi[2]), float(s_lo[2])
+        if s_bottom < ob_bottom < s_top - tol:        # 主体底陷在该物体体内、且低于其顶面
+            worst = max(worst, s_top - ob_bottom)
+    return worst
+
+
 def reseat(obj, max_drop: float = 5.0) -> bool:
     """把物体竖直下落，使底部贴到下方支撑面（留 CONTACT_EPS）。返回是否成功。"""
     gap = support_gap(obj)
