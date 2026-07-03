@@ -121,6 +121,20 @@ def support_gap(obj) -> Optional[float]:
     return float(origin[2] - loc[2])
 
 
+def floor_penetration(obj, floor_z: float) -> float:
+    """物体**最低点**低于地面多少（米）。>0 = 穿地（有几何在地面以下）；≤0 = 没穿地。
+
+    包围盒最低角 z 即世界系最低点。任何东西都不该低于地面——无论它贴地还是架在桌上，
+    最低点都应 ≥ 地面。所以这一式对**所有**物体都成立地检出"穿地"，且不会把接触/贴合误判
+    （贴地时最低点≈地面高度，深度≈0）。桌上物最低点在桌面高度 >> 地面 → 深度为负 → 不误报。
+    """
+    try:
+        bb = np.asarray(obj.get_bound_box())
+        return max(0.0, float(floor_z) - float(bb.min(axis=0)[2]))
+    except Exception:
+        return 0.0
+
+
 def reseat(obj, max_drop: float = 5.0) -> bool:
     """把物体竖直下落，使底部贴到下方支撑面（留 CONTACT_EPS）。返回是否成功。"""
     gap = support_gap(obj)

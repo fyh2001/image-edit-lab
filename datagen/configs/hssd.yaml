@@ -142,3 +142,4 @@ render:
     max_change_ratio: 0.95
     min_sharpness: 3.0
     max_background_diff: 6.0
+    max_penetration: 0.02        # 主体最低点低于地面 >2cm → 判穿模地面，丢弃

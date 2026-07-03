@@ -333,7 +333,17 @@ def _produce_pair(ctx, spec, backend, editor, job_id, op_name=None, seen=None):
     v["change_visible"] = True
     v["pixel_change_ratio"] = round(float(ratio), 4)
     v.setdefault("penetration_depth", 0.0)
-    if ctx.subject is not None:
+    # delete 后主体已隐藏，几何检查无意义；其余算子对最终主体做穿地/悬空检查。
+    if ctx.subject is not None and meta.get("op") != "object_delete":
+        gz = float(ctx.extras.get("scene_geom", {}).get("ground_z", 0.0))
+        # 穿地：最低点低于地面多少（不管贴地还是在桌上都对；接触≈0 不误判）→ 超阈值直接丢
+        pen = validity.floor_penetration(ctx.subject, gz)
+        v["penetration_depth"] = round(pen, 4)
+        max_pen = float((spec.render.get("quality") or {}).get("max_penetration", 0.02))
+        if pen > max_pen:
+            print(f"[run_job] DISCARD(穿模地面 {pen:.3f}m>{max_pen}) {job_id}")
+            return False
+        # 悬空：优先用射线到真实支撑面的间隙；射线失败退回"最低点距地面"（仅当支撑是地面时才准）
         gap = None
         try:
             gap = validity.support_gap(ctx.subject)
@@ -341,9 +351,8 @@ def _produce_pair(ctx, spec, backend, editor, job_id, op_name=None, seen=None):
             pass
         if gap is None:
             try:
-                gz = ctx.extras.get("scene_geom", {}).get("ground_z", 0.0)
                 bb = np.asarray(ctx.subject.get_bound_box())
-                gap = float(bb.min(axis=0)[2]) - float(gz)
+                gap = float(bb.min(axis=0)[2]) - gz
             except Exception:
                 pass
         if gap is not None:
