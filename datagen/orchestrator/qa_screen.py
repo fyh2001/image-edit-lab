@@ -40,9 +40,10 @@ def screen_pair(sample, before, after):
     cr = q.get("change_ratio", v.get("pixel_change_ratio"))
     flags = []
 
-    # 1) 变化几乎看不见 → 物体太小/没动/移出画面/消失（date 飞走那类）
-    if cr is not None and float(cr) < 0.004:
-        flags.append(("imperceptible", f"变化几乎看不见(change_ratio={cr})——物体可能太小/移出画面/消失", 3))
+    # 1) 变化几乎看不见 → 物体没动/移出画面/消失。阈值取很低(0.0015)：小物 add 虽变化小但通常可见，
+    #    别误报；真正"消失"的多半更小、或另有 far_move 命中。
+    if cr is not None and float(cr) < 0.0015:
+        flags.append(("imperceptible", f"变化几乎看不见(change_ratio={cr})——物体可能移出画面/消失", 3))
 
     # 2) move 移动过远 → 大概率移出画面或落点离谱
     if op == "object_move":

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datagen.worker.edits.base import EditInvalid
 from datagen.worker.edits._common import hide
-from datagen.worker.physics import surfaces, placement
+from datagen.worker.physics import surfaces, placement, validity
 from datagen.worker.registry import build
 
 _DEFAULT_PROVIDER_PARAMS = {
@@ -58,7 +58,7 @@ def spawn_surface_subject(ctx, params=None, hide_after=False):
         near = None
 
     new_obj, res = None, None
-    for _ in range(5):                       # 有些物体太大放不下任何表面 → 换几个再试
+    for _ in range(6):                       # 换几个物体/落点重试：放不下 or 放上去穿模都换
         if new_obj is not None:
             try:
                 new_obj.delete()
@@ -68,18 +68,23 @@ def spawn_surface_subject(ctx, params=None, hide_after=False):
         res = surfaces.find_support_point(
             ctx, new_obj, ctx.rng, in_view=placement._camera_in_view,
             prefer_on_object=prefer_on_object, near=near)
-        if res is not None:
-            break
+        if res is None:
+            continue
+        new_obj.set_location(res[0])
+        # 放置后查碰撞：干净地架在支撑上不算（离面 1mm），插进支撑体/邻物才算 → 穿模就换
+        if validity.collides(new_obj, ctx.all_objects):
+            res = None
+            continue
+        break
     if res is None:
         if new_obj is not None:
             try:
                 new_obj.delete()
             except Exception:
                 pass
-        raise EditInvalid("spawn_surface_subject: 找不到能稳放的表面")
+        raise EditInvalid("spawn_surface_subject: 找不到能稳放且不穿模的表面")
 
     loc, label, sobj = res
-    new_obj.set_location(loc)
     ctx.subject = new_obj
     ctx.extras["subject_origin"] = "spawned"     # 溯源：主体是现场加进去的，非场景原有
     # 相机框到新物体上（中景），before/after 同机位、像素对齐

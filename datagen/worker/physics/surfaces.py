@@ -49,6 +49,9 @@ def find_support_point(ctx, subject, rng, edge_margin: float = 0.05,
     s_halfxy = float(max(s_half[0], s_half[1]))
     s_h = float(sb.max(axis=0)[2] - sb.min(axis=0)[2])
     need = s_halfxy + edge_margin
+    # 支撑物顶面要**明显大于**主体 footprint（留 1.4× 余量）——否则像台灯 shade 这种勉强够的、
+    # 又细又空的会被选中，物体架上去要么悬边要么插进支撑体（穿模）。比 need 更严，只用于筛支撑物。
+    support_need = s_halfxy * 1.4 + edge_margin
     near_xy = None if near is None else np.asarray(near, dtype=float)[:2]
 
     # 候选支撑物：顶面高于地面、顶面 footprint 半径足够放下主体
@@ -72,7 +75,7 @@ def find_support_point(ctx, subject, rng, edge_margin: float = 0.05,
         # 顶面要在"看得清的桌/台/柜/座面高度"区间：太高（衣柜顶/吊柜/接近天花板）相机拍不到、
         # 还会被自身遮挡 → 变化不可见。cap 到 ground+max_support_h。
         if (ground + 0.08 < top <= ground + max_support_h
-                and min(float(half[0]), float(half[1])) >= need):
+                and min(float(half[0]), float(half[1])) >= support_need):
             cands.append((o, bb))
             if base > ground + 0.15:                    # 底部离地 → 它本身架在别的东西上
                 elevated.append((o, bb))

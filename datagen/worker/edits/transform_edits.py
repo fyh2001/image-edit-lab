@@ -130,6 +130,11 @@ class MoveEdit(EditOperator):
         min_move = float(self.params.get("min_distance", max(0.8, 0.5 * subj_r)))
 
         qcfg, res = _quality(ctx)
+        # move 后主体必须**清晰可见**：屏占比下限比全局更严，否则小物被挪远/挪地板会小到看不见
+        # （date 挪到 4m 外物顶上→画面里找不到，是坏样本）。默认 0.004≈屏面积 0.4%。
+        qcfg = dict(qcfg)
+        qcfg["min_area"] = max(float(qcfg.get("min_area", 0.005)),
+                               float(self.params.get("min_visible_area", 0.004)))
         modes = placement.available_modes(geom, ctx.distractors)
         weights = self.params.get("placement_weights", {})
         probs = np.array([weights.get(m, 1.0) for m in modes], dtype=float)

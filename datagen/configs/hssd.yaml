@@ -70,7 +70,8 @@ edits:
   params:
     object_move:
       # object_top = 表面感知放置：把够小的家具挪到桌面/台面/柜顶（放不下自动回退到地面）
-      placement_weights: {support_surface: 2.0, object_top: 1.5, floating: 0.0}
+      # ceiling/floating 关掉：把物体挪到天花板/悬空几乎总是不合理（QA 反复标 odd_placement）。
+      placement_weights: {support_surface: 2.0, object_top: 1.5, ceiling: 0.0, wall: 0.0, floating: 0.0}
       # subject_source：主体来源（三种混着产）——scene=直接编辑已有物体；spawn=加外部物体到
       # 空表面再操作；replace=用外部物体替换已有物体的槽位再操作。同 scale/rotate。
       subject_source: {scene: 0.5, spawn: 0.25, replace: 0.25}
