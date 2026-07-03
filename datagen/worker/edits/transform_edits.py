@@ -318,6 +318,13 @@ class RotateEdit(EditOperator):
         ref = _reference.subject_phrase(ctx, obj)
         if ref is None:
             raise EditInvalid("object_rotate: 主体与画面里同类物体无法区分（歧义），丢弃")
+        from datagen.worker.assets.indoor_categories import is_wall_integrated
+        try:
+            _cat = obj.get_cp("category")
+        except Exception:
+            _cat = None
+        if is_wall_integrated(_cat):
+            raise EditInvalid(f"object_rotate: {_cat} 是壁挂/嵌入/靠墙类，原地旋转必假，丢弃")
         max_deg = float(self.params.get("max_degrees", 180))
         allowed = self.params.get("axes", ["X", "Y", "Z"])
         bmin, bmax = _bounds(ctx)

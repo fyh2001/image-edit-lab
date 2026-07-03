@@ -111,6 +111,12 @@ class ReplaceEdit(EditOperator):
         # 放大成穿模巨物（"地毯→2m 陶器"）；而且"把地毯换成陶器"本身也别扭。跳过。
         if old_n and any(k in old_n.lower() for k in ("carpet", "rug", " mat", "mat ", "runner", "carpeting")):
             raise EditInvalid("object_replace: 扁平地面覆盖物不适合替换，丢弃")
+        # 壁挂/嵌入/靠墙大件（床/柜/镜/画/洁具）不适合替换：新物落到其贴墙位会浮在墙上或插进墙
+        # （bed→pottery 那类穿模）。这些"和墙融为一体"的类别跳过。
+        from datagen.worker.assets.indoor_categories import is_wall_integrated
+        _cat = _safe_cp(old, "category")
+        if is_wall_integrated(_cat) or is_wall_integrated(old_n):
+            raise EditInvalid(f"object_replace: {_cat or old_n} 是壁挂/嵌入/靠墙类，替换易穿墙，丢弃")
         old_ref = _reference.subject_phrase(ctx, old)   # 消歧要在 hide 旧物前算
         if old_ref is None:
             raise EditInvalid("object_replace: 旧物与画面里同类物体无法区分（歧义），丢弃")

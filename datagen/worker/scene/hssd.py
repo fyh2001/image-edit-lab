@@ -104,6 +104,7 @@ class HSSDScene(SceneBuilder):
 
         # 4) 房间几何（上面已算）+ 室内灯
         ctx.extras["scene_geom"] = geom
+        ctx.extras["stage_objs"] = stage_objs        # 墙/地/顶结构件，供碰撞校验（防转进墙/穿地）
         ctx.extras["subject_support"] = "ground"
         ctx.extras["ground"] = stage_objs[0] if stage_objs else None
         _setup_lighting(ctx, ctx.extras["scene_geom"])

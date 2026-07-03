@@ -108,6 +108,25 @@ def _norm(c) -> str:
 INDOOR_ALLOWLIST = {_norm(c) for c in INDOOR_ALLOWLIST}
 
 
+# 壁挂 / 嵌入 / 管道 / 靠墙大件：原地旋转会穿墙脱墙、替换成紧凑物会浮在墙上或穿墙 → 这些
+# 类别不适合当 rotate / replace 的主体（它们是"和墙融为一体"的，不能自由摆弄）。
+WALL_INTEGRATED = {
+    "cabinet", "cupboard", "wardrobe", "closet", "armoire", "mirror", "picture", "painting",
+    "poster", "shelf", "shelves", "bookshelf", "bookcase", "headboard", "bed", "sink", "vanity",
+    "toilet", "bathtub", "shower", "window", "door", "curtain", "drape", "blind", "blinds",
+    "radiator", "fireplace", "stair", "stairs", "staircase", "counter", "countertop", "dishwasher",
+    "washer", "dryer", "oven", "stove", "refrigerator", "fridge", "sconce", "chandelier",
+}
+
+
+def is_wall_integrated(category) -> bool:
+    """该类别是否"和墙/结构融为一体"（不适合原地旋转或被替换）。"""
+    if not category:
+        return False
+    n = _norm(category)
+    return n in WALL_INTEGRATED or any(t in WALL_INTEGRATED for t in n.split("_"))
+
+
 def is_indoor(category) -> bool:
     """该类别是否为室内家居可放置物（用于过滤 add/replace 的候选物体）。
 
