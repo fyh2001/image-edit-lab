@@ -41,12 +41,29 @@ def laplacian_sharpness(img) -> float:
     return float(lap.var())
 
 
+def _dilate(mask: np.ndarray, r: int) -> np.ndarray:
+    """布尔掩码盒式膨胀半径 r（纯 numpy 积分图，精确、O(HW)）。"""
+    if r <= 0:
+        return mask
+    H, W = mask.shape
+    ii = np.zeros((H + 1, W + 1), dtype=np.int32)
+    ii[1:, 1:] = mask.astype(np.int32).cumsum(0).cumsum(1)
+    y0 = np.clip(np.arange(H) - r, 0, H)
+    y1 = np.clip(np.arange(H) + r + 1, 0, H)
+    x0 = np.clip(np.arange(W) - r, 0, W)
+    x1 = np.clip(np.arange(W) + r + 1, 0, W)
+    Y0, X0 = np.meshgrid(y0, x0, indexing="ij")
+    Y1, X1 = np.meshgrid(y1, x1, indexing="ij")
+    s = ii[Y1, X1] - ii[Y0, X1] - ii[Y1, X0] + ii[Y0, X0]
+    return s > 0
+
+
 def background_diff(before, after, pix_delta: int = 12, pad_frac: float = 0.05) -> float:
     """**编辑区之外**的平均绝对差（0~255）。
 
-    编辑区 = 变化掩码的包围框（move/scale 会同时覆盖前后两处位置，取并集包围框即可）。
-    本管线相机/场景固定、只改主体，理论上编辑区外只剩阴影/GI 轻微变化 → 该值应很小。
-    偏大 = 编辑区外还有别的东西在变（整体错位/闪烁/相机漂移），对齐变差。
+    编辑区 = 变化掩码本身**膨胀 pad** 后的区域（不是它的大包围框）。move 会同时覆盖前后两处
+    位置——用包围框会把两处**之间的大片背景**也豁免掉，从而漏掉"背景整体漂移"；用膨胀掩码
+    则只豁免真正变化的两坨,中间背景若在动照样能抓到。相机/场景固定、只改主体，此值应很小。
     """
     a = np.asarray(before, dtype=np.float32)
     b = np.asarray(after, dtype=np.float32)
@@ -57,14 +74,9 @@ def background_diff(before, after, pix_delta: int = 12, pad_frac: float = 0.05) 
     mask = change_mask(before, after, pix_delta)
     if not mask.any():
         return 0.0
-    ys, xs = np.where(mask)
-    px, py = pad_frac * W, pad_frac * H
-    x0 = int(max(0, np.floor(xs.min() - px)))
-    x1 = int(min(W, np.ceil(xs.max() + 1 + px)))
-    y0 = int(max(0, np.floor(ys.min() - py)))
-    y1 = int(min(H, np.ceil(ys.max() + 1 + py)))
-    outside = np.ones((H, W), dtype=bool)
-    outside[y0:y1, x0:x1] = False                          # 抠掉编辑区（含 pad）
+    r = int(round(pad_frac * min(H, W)))
+    edited = _dilate(mask, r)                              # 变化区（膨胀 pad）——只抠这些，不抠大框
+    outside = ~edited
     if not outside.any():
         return 0.0                                         # 变化铺满全图，无"区外"
     return float(diff[outside].mean())
@@ -81,5 +93,6 @@ def compute_scores(before, after, pix_delta: int = 12) -> Dict[str, float]:
         "change_ratio": round(change_ratio(before, after, pix_delta), 4),
         "sharpness": round(laplacian_sharpness(after), 2),
         "background_diff": round(background_diff(before, after, pix_delta), 3),
-        "brightness": round(mean_luminance(before), 1),   # 用 before（源图）判是否太暗
+        # 取 before/after **较暗的一帧**：after 因编辑变黑（删主光源/纯黑替换物）也要拦
+        "brightness": round(min(mean_luminance(before), mean_luminance(after)), 1),
     }

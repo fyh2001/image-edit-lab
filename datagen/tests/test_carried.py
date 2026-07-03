@@ -57,6 +57,21 @@ def test_follow_drop():
     assert np.allclose(lamp.get_location(), [0.2, 0, 0.85])
 
 
+def test_resting_on_rejects_adjacent():
+    # 旁边一个等高的矮柜，中心落在主体 footprint 之外 → 不该被当承载物（否则 move 会拖走它）
+    subj = _subject()                                     # 顶面 z=1.0, footprint x/y∈[-0.5,0.5]
+    beside = FakeObj([0.9, 0, 1.15], [0.4, 0.4, 0.3])     # 中心 x=0.9 在 footprint 外
+    assert beside not in _carried.resting_on(subj, [beside])
+
+
+def test_follow_scale_top_moves_toward_center():
+    # scale 缩小到 0.5：承载物水平向主体中心收一半、竖直落 dz
+    lamp = FakeObj([0.4, 0.2, 1.15], [0.1, 0.1, 0.3])
+    snap = _carried.snapshot([lamp])
+    _carried.follow_scale_top(snap, center_xy=[0.0, 0.0], factor=0.5, dz=0.3)
+    assert np.allclose(lamp.get_location(), [0.2, 0.1, 0.85])
+
+
 def test_follow_rotate_z():
     lamp = FakeObj([0.3, 0, 1.15], [0.2, 0.2, 0.3])
     snap = _carried.snapshot([lamp])

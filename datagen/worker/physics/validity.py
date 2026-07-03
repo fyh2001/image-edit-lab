@@ -223,9 +223,24 @@ def camera_quality_ok(obj, resolution, *, min_visible=0.1,
 # ----------------------- 物理沉降 -----------------------
 
 def settle_physics(active_obj, passive_objs, max_sim: float = 4.0) -> None:
-    """让 active_obj 在重力下落稳到 passive_objs 上（确定性需固定步长）。"""
+    """让 active_obj 在重力下落稳到 passive_objs 上。**固定物理步长/求解迭代**以求同 seed 可复现
+    （Blender 物理在固定 substeps + 相同初始态下是确定的；不固定则同 seed 两次落点可能不同）。"""
     import blenderproc as bproc
     try:
+        import bpy
+        scene = bpy.context.scene
+        if scene.rigidbody_world is None:
+            try:
+                bpy.ops.rigidbody.world_add()
+            except Exception:
+                pass
+        rw = scene.rigidbody_world
+        if rw is not None:                       # 固定步长 → 可复现
+            try:
+                rw.substeps_per_frame = 20
+                rw.solver_iterations = 20
+            except Exception:
+                pass
         active_obj.enable_rigidbody(active=True)
         for o in passive_objs:
             if o is active_obj:

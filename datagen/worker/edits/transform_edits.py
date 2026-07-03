@@ -118,6 +118,13 @@ class MoveEdit(EditOperator):
         ref = _reference.subject_phrase(ctx, obj)
         if ref is None:
             raise EditInvalid("object_move: 主体与画面里同类物体无法区分（歧义），丢弃")
+        from datagen.worker.assets.indoor_categories import is_wall_integrated
+        try:
+            _cat = obj.get_cp("category")
+        except Exception:
+            _cat = None
+        if is_wall_integrated(_cat):     # 壁挂/嵌入/靠墙件（镜/柜/床/洁具）移动会脱墙浮空/穿墙
+            raise EditInvalid(f"object_move: {_cat} 是壁挂/嵌入/靠墙类，移动会脱墙，丢弃")
         loc0 = np.array(obj.get_location(), dtype=float)
         # 变换前快照"放在主体顶面上的物体"，稍后让它们随主体一起挪（否则桌上物留原地→悬空）
         carried = _carried.snapshot(_carried.resting_on(obj, ctx.all_objects))
@@ -283,10 +290,13 @@ class ScaleEdit(EditOperator):
         if not ok:
             raise EditInvalid("object_scale: 缩放后碰撞/越界/太小/太大")
 
-        # 承载物落到新顶面（缩小→顶面降 dz，放大→抬升；水平不动）
-        _carried.follow_drop(carried, top_z0 - float(np.asarray(obj.get_bound_box()).max(axis=0)[2]))
-
         f = chosen["f"]
+        # 承载物随主体缩放：顶面降 dz + footprint 按 f 缩放（水平向主体中心收，否则悬在新顶面外）
+        center_xy = ((bbox0.max(axis=0) + bbox0.min(axis=0)) / 2.0)[:2]
+        _carried.follow_scale_top(
+            carried, center_xy, f,
+            top_z0 - float(np.asarray(obj.get_bound_box()).max(axis=0)[2]))
+
         n = noun(obj)
         bigger = f >= 1.0
         instr = self.phrase(
@@ -335,6 +345,11 @@ class RotateEdit(EditOperator):
         baseline = validity.contacts(obj, ctx.all_objects)   # 原场景就接触的邻居，旋转后忽略
         # 变换前快照顶面上的物体，绕竖轴旋转后让它们一起转（否则转桌子→桌上物不动、错位）
         carried = _carried.snapshot(_carried.resting_on(obj, ctx.all_objects))
+        # 有承载物时**只准绕竖轴 Z**：绕 X/Y 翻倒会让桌上物悬在半空（承载物只对 Z 跟随）。
+        if carried:
+            allowed = [a for a in allowed if a == "Z"]
+            if not allowed:
+                raise EditInvalid("object_rotate: 主体顶面有物体，不能绕 X/Y 翻转（会致悬空）")
         chosen = {}
 
         min_deg = float(self.params.get("min_degrees", 15))

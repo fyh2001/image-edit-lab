@@ -13,6 +13,27 @@ def _img(val, shape=(64, 64, 3)):
     return np.full(shape, val, dtype=np.uint8)
 
 
+def test_background_diff_move_catches_middle_drift():
+    # move：主体从左移到右（两坨明显变化，同一行）+ 两坨**之间**背景有细微漂移(<阈值,不进变化掩码)。
+    # 旧的"大包围框"横跨两坨会把中间豁免掉→漏检；新的"膨胀掩码"只豁免两坨本身→中间漂移被抓到。
+    a = _img(100, (64, 64, 3))
+    b = a.copy()
+    b[24:40, 4:14] = 200        # 左边一坨（主体原位，明显变化）
+    b[24:40, 50:60] = 200       # 右边一坨（主体新位）
+    b[24:40, 24:40] = 106       # 两坨之间：细微漂移 +6（<pix_delta，不算"变化"，是背景漂移）
+    d = metrics.background_diff(a, b, pix_delta=12)
+    # 旧的大包围框法会把中间豁免→d≈0；新法把中间算进区外→d 明显非零（即"抓到了"）。
+    assert d > 0.2, f"两坨之间的背景漂移应被抓到（非零），got {d}"
+
+
+def test_background_diff_clean_near_zero():
+    # 只有单处变化、区外干净 → background_diff ≈ 0
+    a = _img(100, (64, 64, 3))
+    b = a.copy()
+    b[26:38, 26:38] = 200
+    assert metrics.background_diff(a, b, pix_delta=12) < 0.5
+
+
 def test_change_ratio_identical_zero():
     a = _img(100)
     assert metrics.change_ratio(a, a.copy()) == 0.0
