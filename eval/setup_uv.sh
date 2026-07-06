@@ -7,6 +7,10 @@ set -euo pipefail
 # CUDA 轮子版本：新驱动用 cu124；驱动较老改成 cu121。
 CUDA="${CUDA:-cu124}"
 PYVER="${PYVER:-3.11}"     # 别用 3.13(太新，wheel 常缺)
+# **钉死一对官方成对发布的 torch/torchvision**——只给 index 不钉版本时，uv 可能解析出不配套的
+# 组合，仍报 "operator torchvision::nms does not exist"。torch 2.6.0 ↔ torchvision 0.21.0。
+TORCH="${TORCH:-2.6.0}"
+TVISION="${TVISION:-0.21.0}"
 
 # 1) 装 uv(若没有)
 if ! command -v uv >/dev/null 2>&1; then
@@ -19,8 +23,10 @@ uv venv --python "$PYVER" .venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
 
-# 3) torch + torchvision 配套(同一 CUDA index，成对安装)
-uv pip install torch torchvision --index-url "https://download.pytorch.org/whl/${CUDA}"
+# 3) torch + torchvision 配套(钉死版本 + 同一 CUDA index，成对安装)
+uv pip install --force-reinstall \
+  "torch==${TORCH}" "torchvision==${TVISION}" \
+  --index-url "https://download.pytorch.org/whl/${CUDA}"
 
 # 4) 推理库(从默认 PyPI)
 uv pip install -U diffusers transformers accelerate pillow openai
