@@ -1,6 +1,22 @@
 # eval — 评测 / 基座模型试跑
 
-## Qwen-Image-Edit 推理（SGLang Diffusion）
+## Qwen-Image-Edit 推理 —— 两种跑法
+
+**A. 直接加载模型跑（`qwen_edit_diffusers.py`，不用起服务，推荐先用这个试效果）**
+```bash
+pip install -U diffusers transformers accelerate torch pillow
+# 单图：
+python eval/qwen_edit_diffusers.py --image before.png --prompt "把桌上的花瓶移到左边" --out out.png
+# 批量跑我们的数据 + 三栏对比 HTML：
+python eval/qwen_edit_diffusers.py --dataset-dir ./out/gallery_v5 --out-dir ./out/qwen_eval --limit 40
+# 8 卡数据并行(不用 serve)：CUDA_VISIBLE_DEVICES=$i ... --shard $i/8（脚本末尾有 for 循环示例）
+# 2509 改进版： --model Qwen/Qwen-Image-Edit-2509 --plus ；显存紧： --cpu-offload
+```
+
+**B. 起服务再调（`qwen_edit_sglang.py`，要高吞吐/多人共用时）**
+见下。
+
+## Qwen-Image-Edit 推理（SGLang Diffusion，serve 方式）
 
 `qwen_edit_sglang.py` —— 用 **SGLang Diffusion**(2025-11 起支持扩散图像编辑,day-0 支持
 Qwen-Image-Edit)跑基座模型推理,试它在我们数据上的编辑效果。注意 **vLLM / SGLang 的普通
