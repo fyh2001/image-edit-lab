@@ -74,15 +74,21 @@ def main():
         # 摊销模式一场景产多对，落在 <job_id>_pNN/ 目录；单对则 <job_id>/。返回产出数。
         return len(_glob.glob(os.path.join(out_abs, f"{job_id}*", "sample.json")))
 
-    # 续跑：已产出的 job 直接跳过（不重删、不重渲）
+    # 续跑：已产出的 job 直接跳过（不重删、不重渲）。
+    # **一次性**列出目录建已完成集合——s3fs 共享目录上"每 job glob 一次"会慢到没法用。
+    import re as _re
     already_done, pairs_pre = 0, 0
     if args.resume:
+        done_jobids, all_sj = {}, _glob.glob(os.path.join(out_abs, "*", "sample.json"))
+        for p in all_sj:                                   # 目录名如 job_0000003_p01_move / job_0000003
+            m = _re.match(r"(job_\d+)", os.path.basename(os.path.dirname(p)))
+            if m:
+                done_jobids[m.group(1)] = done_jobids.get(m.group(1), 0) + 1
         pending = []
         for spec in specs:
-            n = _produced(spec.job_id)
-            if n > 0:
+            if spec.job_id in done_jobids:
                 already_done += 1
-                pairs_pre += n
+                pairs_pre += done_jobids[spec.job_id]
             else:
                 pending.append(spec)
         print(f"[resume] 目标 {len(specs)} job；已完成 {already_done}(累计 {pairs_pre} 对)，"
