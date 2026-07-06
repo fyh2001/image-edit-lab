@@ -39,9 +39,12 @@ def main():
     ap.add_argument("--num-jobs", type=int, default=None, help="覆盖 run.num_jobs")
     ap.add_argument("--resolution", type=int, nargs=2, default=None, help="覆盖 render.resolution")
     ap.add_argument("--samples", type=int, default=None, help="覆盖 render.samples")
+    ap.add_argument("--output-dir", default=None, help="覆盖 run.output_dir(建议放快盘)")
     ap.add_argument("--max-tries", type=int, default=2)
     ap.add_argument("--workers", type=int, default=1, help="并发跑几个 blenderproc（放量时提速）")
     ap.add_argument("--quiet", action="store_true", help="不打印每个 job 的渲染输出，只报进度")
+    ap.add_argument("--resume", action="store_true",
+                    help="续跑：跳过已产出的 job(靠输出目录里已有的 sample.json 判断)，不重删。中断/换机器接着跑用它")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(open(os.path.join(PROJ, args.config), encoding="utf-8"))
@@ -51,17 +54,58 @@ def main():
         cfg["render"]["resolution"] = list(args.resolution)
     if args.samples is not None:
         cfg["render"]["samples"] = args.samples
+    if args.output_dir is not None:
+        cfg["run"]["output_dir"] = args.output_dir
 
     out = cfg["run"]["output_dir"]
-    os.makedirs(os.path.join(PROJ, out), exist_ok=True)
-    specs = generate_jobspecs(cfg)
+    out_abs = out if os.path.isabs(out) else os.path.join(PROJ, out)
+    os.makedirs(out_abs, exist_ok=True)
+    specs = list(generate_jobspecs(cfg))
 
     import glob as _glob
+    import threading
+    import time as _time
+
+    ledger_path = os.path.join(out_abs, "progress.jsonl")     # 逐 job 追加(可复原、跨机器带走)
+    summary_path = os.path.join(out_abs, "progress.json")     # 汇总，随时 cat 看进度
+    _lock = threading.Lock()
 
     def _produced(job_id):
         # 摊销模式一场景产多对，落在 <job_id>_pNN/ 目录；单对则 <job_id>/。返回产出数。
-        pat = os.path.join(PROJ, out, f"{job_id}*", "sample.json")
-        return len(_glob.glob(pat))
+        return len(_glob.glob(os.path.join(out_abs, f"{job_id}*", "sample.json")))
+
+    # 续跑：已产出的 job 直接跳过（不重删、不重渲）
+    already_done, pairs_pre = 0, 0
+    if args.resume:
+        pending = []
+        for spec in specs:
+            n = _produced(spec.job_id)
+            if n > 0:
+                already_done += 1
+                pairs_pre += n
+            else:
+                pending.append(spec)
+        print(f"[resume] 目标 {len(specs)} job；已完成 {already_done}(累计 {pairs_pre} 对)，"
+              f"待跑 {len(pending)}", flush=True)
+        specs = pending
+
+    def _record(entry):
+        with _lock:
+            with open(ledger_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    def _write_summary(done, ok, fail, pairs, t0):
+        with _lock:
+            json.dump({
+                "target_jobs": len(specs) + already_done,
+                "done_jobs": done + already_done,
+                "ok": ok, "fail": fail,
+                "pairs_total": pairs + pairs_pre,
+                "rate_job_per_s": round(done / max(1e-6, _time.time() - t0), 3),
+                "output_dir": out_abs, "config": args.config,
+                "samples": cfg["render"].get("samples"), "resolution": cfg["render"].get("resolution"),
+                "updated_epoch": int(_time.time()),
+            }, open(summary_path, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
     def run_one(spec):
         for t in range(args.max_tries):
@@ -71,7 +115,7 @@ def main():
             spec_path = os.path.join(tempfile.gettempdir(), sd["job_id"] + ".json")
             with open(spec_path, "w", encoding="utf-8") as f:
                 json.dump(sd, f, ensure_ascii=False)
-            for old in _glob.glob(os.path.join(PROJ, out, f"{sd['job_id']}*", "sample.json")):
+            for old in _glob.glob(os.path.join(out_abs, f"{sd['job_id']}*", "sample.json")):
                 os.remove(old)
             r = subprocess.run(
                 ["blenderproc", "run",
@@ -81,28 +125,32 @@ def main():
                 stderr=(subprocess.DEVNULL if args.quiet else None))
             n = _produced(sd["job_id"]) if r.returncode == 0 else 0
             if n > 0:
-                return (sd["job_id"], spec.edit["name"], f"{n} 对", True)
-        return (spec.job_id, spec.edit["name"], "<未产出>", False)
+                return (sd["job_id"], spec.edit["name"], n, True)
+        return (spec.job_id, spec.edit["name"], 0, False)
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    import time as _time
-    ok, fail, summary, done, t0 = 0, 0, [], 0, _time.time()
+    ok, fail, pairs, done, t0 = 0, 0, 0, 0, _time.time()
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
         futs = [ex.submit(run_one, spec) for spec in specs]
         for fut in as_completed(futs):
-            jid, edit, instr, produced = fut.result()
+            jid, edit, npairs, produced = fut.result()
             done += 1
             ok += int(produced)
             fail += int(not produced)
-            summary.append((jid, edit, instr))
-            if done % 20 == 0 or done == len(specs):
+            pairs += npairs
+            _record({"job_id": jid, "edit": edit, "pairs": npairs, "ok": produced,
+                     "ts": int(_time.time())})
+            if done % 10 == 0 or done == len(specs):
+                _write_summary(done, ok, fail, pairs, t0)
                 rate = done / max(1e-6, _time.time() - t0)
-                print(f"进度 {done}/{len(specs)}  成功 {ok} 失败 {fail}  "
-                      f"({rate:.2f} job/s)", flush=True)
+                print(f"进度 {done + already_done}/{len(specs) + already_done}  "
+                      f"成功 {ok} 失败 {fail}  产出 {pairs + pairs_pre} 对  "
+                      f"({rate:.2f} job/s, {pairs / max(1e-6, _time.time()-t0)*3600:.0f} 对/时)", flush=True)
 
-    print(f"\n本地批量完成：成功 {ok} / 失败 {fail}")
-    for jid, edit, instr in summary:
-        print(f"  {jid}  [{edit}]  {instr}")
+    _write_summary(done, ok, fail, pairs, t0)
+    print(f"\n本地批量完成：成功 {ok} / 失败 {fail} / 本次产出 {pairs} 对"
+          f"（含续跑前累计 {pairs + pairs_pre} 对）")
+    print(f"进度账本: {ledger_path}\n进度汇总: {summary_path}")
 
 
 if __name__ == "__main__":

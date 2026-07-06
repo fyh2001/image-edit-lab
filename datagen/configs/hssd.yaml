@@ -121,7 +121,7 @@ render:
   backend: "cycles_gpu"
   resolution: [1024, 1024]     # 质量保险位：文字/纹理最锐；渲高可下采样到 512/768 训练，渲低补不回。
                                # 想省一半存储/时间就改 [768,768]（也很清晰）；512 会糊，别用。
-  samples: 128                 # 高一点去噪后不塑料（H100 上很便宜）；OPTIX 降噪兜底
+  samples: 48                  # OPTIX 降噪兜底，48 已够干净；比 128 快 ~2.5×(GPU 是瓶颈)。要更净调高。
   pairs_per_scene: 12          # 摊销加载：一间房 load 一次 → 产多对（换家具/机位/算子）
   global_illumination: "full"
   view_transform: "AgX"        # 色彩管理：高光滚降，少 CG 多照片（Standard 会死白发假）
