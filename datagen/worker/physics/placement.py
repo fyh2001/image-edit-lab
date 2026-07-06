@@ -97,9 +97,28 @@ def sample_move_target(mode: str, ctx, subject, rng, params: Dict) -> Dict:
     ground_z = geom.get("ground_z", 0.0)
 
     if mode == "support_surface":
-        xy = _rand_xy(rng, geom)
+        # 落点必须**在主体附近 + 在画面里**：多房间 HSSD 的地板横跨整栋楼，直接全局随机会把物体
+        # 挪到 13m 外另一个房间、彻底出画(看着像凭空消失)。这里在主体周围半径内采、并要求相机看得见。
+        subj_xy = np.asarray(subject.get_location(), dtype=float)[:2]
+        radius = float(params.get("move_floor_radius", 3.5))
+        bmin, bmax = geom.get("bounds_min"), geom.get("bounds_max")
+
+        def _clip(c):
+            if bmin is not None:
+                c[0] = min(max(c[0], bmin[0] + 0.3), bmax[0] - 0.3)
+                c[1] = min(max(c[1], bmin[1] + 0.3), bmax[1] - 0.3)
+            return c
+
         z = ground_z + half_h                    # 之后 reseat 精修
-        return {"location": [xy[0], xy[1], z], "support": "ground",
+        xy = None
+        for _ in range(30):
+            cand = _clip(subj_xy + rng.uniform(-radius, radius, size=2))
+            if _camera_in_view([float(cand[0]), float(cand[1]), z]):
+                xy = cand
+                break
+        if xy is None:                           # 兜底(仍会被 MoveEdit 的 in-view check 兜住)
+            xy = _clip(subj_xy + rng.uniform(-radius, radius, size=2))
+        return {"location": [float(xy[0]), float(xy[1]), z], "support": "ground",
                 "note": "onto the floor"}
 
     if mode == "object_top":

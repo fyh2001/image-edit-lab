@@ -171,6 +171,11 @@ class MoveEdit(EditOperator):
                 return False
             if not validity.in_bounds(obj, bmin, bmax):
                 return False
+            # 主体挪完必须**相机真看得见**（视锥内 + 没被挡）——补 camera_quality_ok 对完全出画物
+            # 会误判"可见"的漏洞（chessboard 挪到 13m 外出画仍过关那类）。
+            bbc = np.asarray(obj.get_bound_box())
+            if not placement._camera_in_view(((bbc.max(0) + bbc.min(0)) / 2.0).tolist()):
+                return False
             # 不能移动后被完全遮挡、也不能太小/太大
             ok, reason = validity.camera_quality_ok(obj, res, **qcfg)
             chosen["q_reason"] = reason
