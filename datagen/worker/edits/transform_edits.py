@@ -163,9 +163,12 @@ class MoveEdit(EditOperator):
                 validity.reseat(obj)
             return mode
 
+        max_move = float(self.params.get("max_distance", 5.0))    # 挪太远→大概率跑到别的房间/出画
+
         def check(_mode):
-            # 位移太小直接拒（最便宜的检查放最前）
-            if float(np.linalg.norm(np.array(obj.get_location()) - loc0)) < min_move:
+            # 位移要够大(避免形同虚设)、又不能太远(避免跨房间挪到看不清/出画)
+            d = float(np.linalg.norm(np.array(obj.get_location()) - loc0))
+            if d < min_move or d > max_move:
                 return False
             if validity.collides(obj, ctx.all_objects, ignore=baseline):
                 return False
